@@ -14,9 +14,9 @@ pieces from.
 | API: conversations, messages, receipts, mute, realtime delivery | Done, tested (8 service tests, a live REST and WebSocket run) |
 | Web app (`apps/web`): sign in, inbox, chat, typing, online, ticks | Done, tested in a browser against a live second user |
 | Photos in messages | Done: shrunk in the browser before upload (a 102 KB PNG went out as a 12.5 KB JPEG), shown at once from a local preview |
-| Mobile (`apps/expo`) | Next |
+| Mobile (`apps/expo`): inbox, chat, new chat, typing, online, ticks, photos | Done. Type-checks with Expo Router's route types; run through Expo web against a live second user, messages and typing both ways |
 | Desktop (`apps/desktop`) | After mobile |
-| Push notifications for offline members | With mobile (the `Notify` hook is in place) |
+| Push notifications for offline members | Next (the API's `Notify` hook is in place) |
 
 ## Run it
 
@@ -125,6 +125,11 @@ Building a blueprint is also a test of Grit. This one found:
 - `*.tsbuildinfo` and `next-env.d.ts` were not ignored. Fixed in Grit v3.297.0.
 - A cloned Grit project could not start: `.env` is not committed, `.env.example` has `CHANGE_ME` for
   every secret, and nothing generated them. `grit env` does, from Grit v3.298.0.
+- Realtime never connected in an Expo app (its token getter returned null), and an Expo app signed its user
+  out after 15 minutes (a refresh per failed request spent one refresh token twice). Fixed in v3.298.0.
+- Generated Expo screens failed `tsc`: a relation to User imported a hook that did not exist, related
+  records were read by a `.name` most models lack, and Expo Router's typed routes rejected every list
+  screen's concatenated route. Fixed in v3.299.0, and `grit upgrade` repairs existing screens.
 - `jsontime.DateTime` marshals to whole seconds, too coarse for read ticks; this blueprint's DTOs use
   `time.Time`.
 - On SQLite, times are compared as text. GORM stores its own timestamps in local time, so a value
