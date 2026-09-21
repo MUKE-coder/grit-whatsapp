@@ -15,8 +15,8 @@ pieces from.
 | Web app (`apps/web`): sign in, inbox, chat, typing, online, ticks | Done, tested in a browser against a live second user |
 | Photos in messages | Done: shrunk in the browser before upload (a 102 KB PNG went out as a 12.5 KB JPEG), shown at once from a local preview |
 | Mobile (`apps/expo`): inbox, chat, new chat, typing, online, ticks, photos | Done. Type-checks with Expo Router's route types; run through Expo web against a live second user, messages and typing both ways |
-| Desktop (`apps/desktop`) | After mobile |
-| Push notifications for offline members | Next (the API's `Notify` hook is in place) |
+| Desktop (`apps/desktop`): the same chat inside the desktop shell | Done. Type-checks and builds; run against a live second user, messages and typing both ways |
+| Push notifications for offline members | Done with `grit plugin add push`: a new message notifies members who have not muted the chat, and tapping it opens the chat. Checked against Expo's live service (no physical phone here, so no banner seen on a device) |
 
 ## Run it
 
@@ -127,6 +127,10 @@ Building a blueprint is also a test of Grit. This one found:
   every secret, and nothing generated them. `grit env` does, from Grit v3.298.0.
 - Realtime never connected in an Expo app (its token getter returned null), and an Expo app signed its user
   out after 15 minutes (a refresh per failed request spent one refresh token twice). Fixed in v3.298.0.
+- Grit had no push notifications at all. `grit plugin add push` exists from v3.300.0, and plugins can now
+  add npm packages, which they could declare but the installer never wrote.
+- The desktop app had an older realtime client with no channels, presence or typing, and its generated
+  forms and lists failed `tsc`. Fixed in v3.301.0.
 - Generated Expo screens failed `tsc`: a relation to User imported a hook that did not exist, related
   records were read by a `.name` most models lack, and Expo Router's typed routes rejected every list
   screen's concatenated route. Fixed in v3.299.0, and `grit upgrade` repairs existing screens.
