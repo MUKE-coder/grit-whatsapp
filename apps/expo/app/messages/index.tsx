@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { relationLabel } from "@/lib/relation-label";
 import { View, Text, TextInput, ScrollView, FlatList, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -67,10 +68,10 @@ export default function MessagesScreen() {
         <Text numberOfLines={1} className="text-[14px] text-[#0F1018] dark:text-white">{String(item.id).slice(0, 8)}</Text>
       </View>
       <View style={{ width: 150 }} className="px-3 py-3">
-        <Text numberOfLines={1} className="text-[14px] text-[#0F1018] dark:text-white">{(item.conversation && (item.conversation.name || item.conversation.title)) || item.conversation_id || ""}</Text>
+        <Text numberOfLines={1} className="text-[14px] text-[#0F1018] dark:text-white">{relationLabel(item.conversation) || item.conversation_id || ""}</Text>
       </View>
       <View style={{ width: 150 }} className="px-3 py-3">
-        <Text numberOfLines={1} className="text-[14px] text-[#0F1018] dark:text-white">{(item.sender && (item.sender.name || item.sender.title)) || item.sender_id || ""}</Text>
+        <Text numberOfLines={1} className="text-[14px] text-[#0F1018] dark:text-white">{relationLabel(item.sender) || item.sender_id || ""}</Text>
       </View>
       <View style={{ width: 150 }} className="px-3 py-3">
         <Text numberOfLines={1} className="text-[14px] text-[#0F1018] dark:text-white">{String(item.body ?? "")}</Text>

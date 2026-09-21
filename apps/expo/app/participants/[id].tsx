@@ -1,4 +1,5 @@
 import { View, Text, ScrollView, ActivityIndicator, Pressable, Alert } from "react-native";
+import { relationLabel } from "@/lib/relation-label";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { ScreenHeader } from "@/components/ui/screen-header";
@@ -56,8 +57,8 @@ export default function ParticipantDetailScreen() {
             {item.id ? String(item.id) : "Untitled"}
           </Text>
           <View className="bg-white dark:bg-[#111118] border border-[#E5E7EB] dark:border-[#1f1f2b] rounded-2xl overflow-hidden">
-            <Row label="Conversation" value={(item.conversation && (item.conversation.name || item.conversation.title)) || item.conversation_id} />
-            <Row label="User" value={(item.user && (item.user.name || item.user.title)) || item.user_id} />
+            <Row label="Conversation" value={relationLabel(item.conversation) || item.conversation_id} />
+            <Row label="User" value={relationLabel(item.user) || item.user_id} />
             <Row label="Role" value={item.role} />
             <Row label="Last Read At" value={item.last_read_at ? new Date(item.last_read_at).toLocaleString() : "—"} />
             <Row label="Last Delivered At" value={item.last_delivered_at ? new Date(item.last_delivered_at).toLocaleString() : "—"} />

@@ -1,4 +1,5 @@
 import { View, Text, ScrollView, ActivityIndicator, Pressable, Alert } from "react-native";
+import { relationLabel } from "@/lib/relation-label";
 import { Image } from "expo-image";
 import { resolveImageUrl } from "@/lib/images";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -60,8 +61,8 @@ export default function MessageDetailScreen() {
             {item.id ? String(item.id) : "Untitled"}
           </Text>
           <View className="bg-white dark:bg-[#111118] border border-[#E5E7EB] dark:border-[#1f1f2b] rounded-2xl overflow-hidden">
-            <Row label="Conversation" value={(item.conversation && (item.conversation.name || item.conversation.title)) || item.conversation_id} />
-            <Row label="User" value={(item.sender && (item.sender.name || item.sender.title)) || item.sender_id} />
+            <Row label="Conversation" value={relationLabel(item.conversation) || item.conversation_id} />
+            <Row label="User" value={relationLabel(item.sender) || item.sender_id} />
             <Row label="Body" value={item.body} />
             <Row label="Kind" value={item.kind} />
             <Row label="Attachment" value={item.attachment?.name || (item.attachment ? "1 file" : "—")} />
