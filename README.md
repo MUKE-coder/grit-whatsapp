@@ -1,6 +1,30 @@
-# whatsapp
+# WhatsApp, built with Grit
 
-Built with [Grit](https://gritframework.dev) — Go + React. Built with Grit.
+A working WhatsApp-style messenger on the web, a phone and the desktop, sharing one Go API: direct and
+group chats, live messages, typing indicators, online status, read receipts, unread counts, mute, photos
+and push notifications. The first [Grit UI](https://gritframework.dev) blueprint.
+
+- **[BLUEPRINT.md](BLUEPRINT.md)**: how to run it, how it works, and how it differs from WhatsApp at scale.
+- **[BUILD-ALONG.md](BUILD-ALONG.md)**: the build step by step, from `grit new` to three clients.
+
+## Run it
+
+You need Go 1.21+, Node 20+, pnpm 10.33.4 and the [Grit CLI](https://gritframework.dev) 3.301.0 or later.
+No Docker: it runs on SQLite.
+
+```bash
+grit env        # .env from .env.example, with every secret generated
+pnpm install
+grit migrate
+grit seed
+grit start
+```
+
+Open http://localhost:3000/register in two browsers, create two accounts, and start a chat.
+
+---
+
+The rest of this file is the standard README of a Grit project.
 
 ## Quick Start
 
