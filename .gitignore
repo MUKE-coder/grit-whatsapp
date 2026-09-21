@@ -71,3 +71,4 @@ pnpm-debug.log*
 # TypeScript and Next.js build artefacts
 *.tsbuildinfo
 next-env.d.ts
+.expo/
