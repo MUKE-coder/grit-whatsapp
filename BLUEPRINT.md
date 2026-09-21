@@ -20,14 +20,18 @@ pieces from.
 
 ## Run it
 
-You need Go 1.21+, Node 20+ and pnpm 10.33.4. No Docker: it runs on SQLite.
+You need Go 1.21+, Node 20+, pnpm 10.33.4 and the Grit CLI 3.298.0 or later (`grit update`). No Docker:
+it runs on SQLite, keeps uploaded photos on local disk, and does without Redis.
 
 ```bash
+grit env        # .env from .env.example, with every secret generated
 pnpm install
 grit migrate
 grit seed
 grit start
 ```
+
+Checked from a fresh clone: `grit env` generated the 10 secrets, and migrate, seed and the API all started.
 
 Open http://localhost:3000/register in two browsers (or a normal and a private window), create two
 accounts, and start a chat from the new chat button.
@@ -119,6 +123,8 @@ Building a blueprint is also a test of Grit. This one found:
 - `grit generate resource` left `apidocs.go` not gofmt-clean (a trailing comma before a marker comment).
 - A `--triple` project's web app has empty sign-in folders and no sign-in pages.
 - `*.tsbuildinfo` and `next-env.d.ts` were not ignored. Fixed in Grit v3.297.0.
+- A cloned Grit project could not start: `.env` is not committed, `.env.example` has `CHANGE_ME` for
+  every secret, and nothing generated them. `grit env` does, from Grit v3.298.0.
 - `jsontime.DateTime` marshals to whole seconds, too coarse for read ticks; this blueprint's DTOs use
   `time.Time`.
 - On SQLite, times are compared as text. GORM stores its own timestamps in local time, so a value
