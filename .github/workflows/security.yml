@@ -83,6 +83,6 @@ jobs:
       - if: matrix.build-mode == 'manual'
         working-directory: apps/api
         run: go build ./...
-      - uses: github/codeql-action/analyze@faaca9a8f6edddba5725ffe5adefdab6669a2eca # v3
+      - uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v3
         with:
           category: "/language:${{ matrix.language }}"
