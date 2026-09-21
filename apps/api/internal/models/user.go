@@ -158,6 +158,7 @@ func Models() []interface{} {
 		&Conversation{},
 		&Participant{},
 		&Message{},
+		&PushToken{},
 		// grit:models
 	}
 }

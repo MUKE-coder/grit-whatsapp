@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { unregisterPush } from "@/lib/push";
 import * as WebBrowser from "expo-web-browser";
 import { api, API_URL } from "./api";
 
@@ -142,6 +143,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(async () => {
+    // First, while the session can still prove the token is this user's.
+    await unregisterPush();
     try {
       await api.post("/auth/logout", {});
     } catch {

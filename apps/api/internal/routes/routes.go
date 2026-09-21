@@ -706,6 +706,9 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	ssoHandler := handlers.NewSSOHandler(db, authService, cfg, ssoRegistry, samlRegistry)
 	// Rebuild the SSO registries when another replica changes a connection.
 	services.WatchSSO(db, ssoRegistry, samlRegistry)
+	pushHandler := handlers.NewPushHandler(db)
+	// A new chat message becomes a push to members who are not muted.
+	chatService.Notify = services.ChatPush(pushHandler.Push)
 	// grit:handlers
 
 	// Files kept by STORAGE_DRIVER=local. Keys under storage.PublicPrefixes are
@@ -1051,6 +1054,10 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 		// v3.31.68 — poll a background CSV import's progress/result.
 		protected.GET("/imports/:id", importJobHandler.GetByID)
 
+		// Push notifications: this device's token, for the signed-in user.
+		protected.POST("/push/tokens", pushHandler.Register)
+		protected.POST("/push/tokens/remove", pushHandler.Unregister)
+		protected.POST("/push/test", pushHandler.Test)
 		// grit:routes:protected
 	}
 

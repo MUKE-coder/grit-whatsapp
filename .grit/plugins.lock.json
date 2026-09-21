@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "name": "push",
+      "version": "1.0.0",
+      "installed_at": "2026-09-21T18:51:23.7377541Z",
+      "files": [
+        "apps/api/internal/handlers/push.go",
+        "apps/api/internal/models/push_token.go",
+        "apps/api/internal/services/push.go",
+        "apps/api/internal/services/push_test.go",
+        "apps/expo/lib/push.ts"
+      ],
+      "injections": [
+        {
+          "file": "apps/api/internal/models/user.go",
+          "marker": "// grit:models",
+          "code": "\t\t\u0026PushToken{},"
+        },
+        {
+          "file": "apps/api/internal/routes/routes.go",
+          "marker": "// grit:handlers",
+          "code": "\tpushHandler := handlers.NewPushHandler(db)"
+        },
+        {
+          "file": "apps/api/internal/routes/routes.go",
+          "marker": "// grit:routes:protected",
+          "code": "\t\t// Push notifications: this device's token, for the signed-in user.\n\t\tprotected.POST(\"/push/tokens\", pushHandler.Register)\n\t\tprotected.POST(\"/push/tokens/remove\", pushHandler.Unregister)\n\t\tprotected.POST(\"/push/test\", pushHandler.Test)"
+        }
+      ],
+      "node_deps": [
+        {
+          "Name": "expo-notifications",
+          "Version": "~0.32.17",
+          "Workspace": "apps/expo"
+        }
+      ]
+    }
+  ]
+}
