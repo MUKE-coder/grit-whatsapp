@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, Bell, BellOff, RotateCw, SendHorizontal } from "lucide-react";
+import { ArrowLeft, Bell, BellOff, ImagePlus, RotateCw, SendHorizontal } from "lucide-react";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Avatar, clockTime, dayLabel, Ticks } from "@/components/chat/bits";
 import { IconButton } from "@/components/chat/sidebar";
@@ -10,6 +10,7 @@ import {
   useMarkReadWhileOpen,
   useMessages,
   useOnline,
+  useSendImage,
   useSendMessage,
   useToggleMute,
 } from "@/hooks/use-chat";
@@ -236,7 +237,14 @@ function Bubble({
         {message.pending === "failed" && (
           <button
             type="button"
-            onClick={() => resend.mutate({ body: message.body, kind: "text", client_id: message.client_id ?? "" })}
+            onClick={() =>
+              resend.mutate({
+                body: message.body,
+                kind: message.kind,
+                attachment: message.attachment,
+                client_id: message.client_id ?? "",
+              })
+            }
             className="mt-1 flex items-center gap-1 text-white text-xs underline"
           >
             <RotateCw className="h-3 w-3" aria-hidden /> Not sent. Tap to retry
@@ -250,6 +258,7 @@ function Bubble({
 function Composer({ conversationId, me }: { conversationId: string; me: Me }) {
   const [text, setText] = useState("");
   const send = useSendMessage(conversationId, me.id);
+  const sendImage = useSendImage(conversationId, me.id);
   const channel = `private-conversations.${conversationId}`;
   const whisper = useWhisper(channel);
   const lastTypingSent = useRef(0);
@@ -284,6 +293,20 @@ function Composer({ conversationId, me }: { conversationId: string; me: Me }) {
         submit();
       }}
     >
+      <label className="cursor-pointer rounded-full p-2.5 text-text-secondary hover:bg-bg-hover hover:text-foreground">
+        <span className="sr-only">Send a photo</span>
+        <ImagePlus className="h-5 w-5" aria-hidden />
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          className="sr-only"
+          onChange={(e) => {
+            for (const file of Array.from(e.target.files ?? [])) void sendImage(file);
+            e.target.value = ""; // the same photo can be picked again
+          }}
+        />
+      </label>
       <label className="flex-1">
         <span className="sr-only">Message</span>
         <textarea

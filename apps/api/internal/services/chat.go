@@ -543,7 +543,10 @@ func (s *ChatService) Mark(conversationID, userID string, read bool) (Receipt, e
 	if err != nil {
 		return Receipt{}, err
 	}
-	now := jsontime.DateTime{Time: time.Now().UTC()}
+	// GORM's clock, not time.Now().UTC(): SQLite compares times as text, so a
+	// receipt written in UTC sorted before a message written a second earlier
+	// in local time, and every message stayed unread.
+	now := jsontime.DateTime{Time: s.DB.Config.NowFunc()}
 	updates := map[string]any{"last_delivered_at": now}
 	if read {
 		updates["last_read_at"] = now

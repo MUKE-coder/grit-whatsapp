@@ -10,7 +10,9 @@ import {
 } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { usePresence, useRealtime } from "@/hooks/use-realtime";
+import { toAttachment, uploader } from "@/lib/chat-upload";
 import {
+  type Attachment,
   type Conversation,
   createGroup,
   fetchConversation,
@@ -120,8 +122,7 @@ function patchInbox(qc: QueryClient, id: string, patch: (c: Conversation) => Con
 export function useSendMessage(conversationId: string, meId: string | undefined) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { body: string; kind: MessageKind; client_id: string }) =>
-      sendMessage(conversationId, input),
+    mutationFn: (input: SendInput) => sendMessage(conversationId, input),
     onMutate: (input) => {
       upsertMessage(qc, {
         id: `local-${input.client_id}`,
@@ -129,30 +130,70 @@ export function useSendMessage(conversationId: string, meId: string | undefined)
         sender_id: meId ?? "",
         body: input.body,
         kind: input.kind,
-        attachment: null,
+        attachment: input.attachment ?? null,
         client_id: input.client_id,
         created_at: new Date().toISOString(),
         pending: "sending",
       });
     },
     onSuccess: (saved) => upsertMessage(qc, saved),
-    onError: (_err, input) => {
-      qc.setQueryData<MessagePages>(chatKeys.messages(conversationId), (data) =>
-        data
-          ? {
-              ...data,
-              pages: data.pages.map((p) =>
-                p.map((m) => (m.client_id === input.client_id ? { ...m, pending: "failed" } : m)),
-              ),
-            }
-          : data,
-      );
-    },
+    onError: (_err, input) => markFailed(qc, conversationId, input.client_id),
   });
 }
 
-export function sendInput(body: string) {
-  return { body, kind: "text" as const, client_id: newClientId() };
+export interface SendInput {
+  body: string;
+  kind: MessageKind;
+  client_id: string;
+  attachment?: Attachment | null;
+}
+
+export function sendInput(body: string): SendInput {
+  return { body, kind: "text", client_id: newClientId() };
+}
+
+function markFailed(qc: QueryClient, conversationId: string, clientId: string) {
+  qc.setQueryData<MessagePages>(chatKeys.messages(conversationId), (data) =>
+    data
+      ? {
+          ...data,
+          pages: data.pages.map((p) => p.map((m) => (m.client_id === clientId ? { ...m, pending: "failed" } : m))),
+        }
+      : data,
+  );
+}
+
+/**
+ * Sends a photo: it shows at once from a local preview, uploads (shrunk in the
+ * browser first), then goes out as an image message pointing at the stored file.
+ */
+export function useSendImage(conversationId: string, meId: string | undefined) {
+  const qc = useQueryClient();
+  const send = useSendMessage(conversationId, meId);
+  return async (file: File) => {
+    const clientId = newClientId();
+    const preview = URL.createObjectURL(file);
+    upsertMessage(qc, {
+      id: `local-${clientId}`,
+      conversation_id: conversationId,
+      sender_id: meId ?? "",
+      body: "",
+      kind: "image",
+      attachment: { url: preview, key: "", name: file.name, mime: file.type, size: file.size },
+      client_id: clientId,
+      created_at: new Date().toISOString(),
+      pending: "sending",
+    });
+    try {
+      const ref = await uploader.upload(file, file.name);
+      send.mutate(
+        { body: "", kind: "image", attachment: toAttachment(ref), client_id: clientId },
+        { onSettled: () => URL.revokeObjectURL(preview) },
+      );
+    } catch {
+      markFailed(qc, conversationId, clientId);
+    }
+  };
 }
 
 export function useStartDirect() {

@@ -17,6 +17,11 @@ import (
 // newChat opens a private in-memory database with three users: ada, ben, cy.
 func newChat(t *testing.T) (*ChatService, map[string]string) {
 	t.Helper()
+	// Not UTC, as on most developers' machines: SQLite compares stored times as
+	// text, which hides an offset mix-up when every time is UTC.
+	local := time.Local
+	time.Local = time.FixedZone("EAT", 3*60*60)
+	t.Cleanup(func() { time.Local = local })
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -126,6 +131,21 @@ func TestSendingMovesTheInboxAndCountsUnread(t *testing.T) {
 	}
 	if inbox[0].Unread != 0 {
 		t.Errorf("after reading, ben has %d unread", inbox[0].Unread)
+	}
+
+	// One more after reading: exactly one unread, not the three already read.
+	// Windows' clock ticks coarsely, and a read and a send in the same tick
+	// share a timestamp; a person is never that quick.
+	time.Sleep(20 * time.Millisecond)
+	if _, err := chat.Send(conv.ID, u["ada"], SendInput{Body: "four"}); err != nil {
+		t.Fatal(err)
+	}
+	inbox, err = chat.Conversations(u["ben"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inbox[0].Unread != 1 {
+		t.Errorf("one message after reading shows %d unread, want 1", inbox[0].Unread)
 	}
 }
 
