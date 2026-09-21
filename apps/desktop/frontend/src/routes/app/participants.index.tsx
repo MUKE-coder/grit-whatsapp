@@ -20,8 +20,8 @@ export const Route = createFileRoute("/app/participants/")({
 });
 
 const COLUMNS: DataColumn[] = [
-  { key: "conversation", label: "Conversation", format: "text" },
-  { key: "user", label: "User", format: "text" },
+  { key: "conversation_label", label: "Conversation", format: "text" },
+  { key: "user_label", label: "User", format: "text" },
   { key: "role", label: "Role", format: "text" },
   { key: "last_read_at", label: "Last Read At", format: "relative" },
   { key: "last_delivered_at", label: "Last Delivered At", format: "relative" },
@@ -47,7 +47,7 @@ function ParticipantsPage() {
   // Resolve belongs_to ids to the related record's name for the table.
   const conversationMap = new Map((useConversations().data ?? []).map((o: any) => [String(o.id), String(o.name ?? o.title ?? o.id)]));
   const userMap = new Map((useUsers().data ?? []).map((o: any) => [String(o.id), String(o.name ?? o.title ?? o.id)]));
-  const rows = items.map((r) => ({ ...r, conversation: conversationMap.get(String((r as any).conversation_id)) ?? "", user: userMap.get(String((r as any).user_id)) ?? "" }));
+  const rows = items.map((r) => ({ ...r, conversation_label: conversationMap.get(String((r as any).conversation_id)) ?? "", user_label: userMap.get(String((r as any).user_id)) ?? "" }));
 
   return (
     <div>

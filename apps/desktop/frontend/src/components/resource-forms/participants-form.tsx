@@ -47,7 +47,7 @@ export function ParticipantForm({ record, submitting, submitLabel, onSubmit, onC
       last_read_at: lastReadAt,
       last_delivered_at: lastDeliveredAt,
       muted: muted,
-    });
+    } as ParticipantInput);
   };
 
   return (

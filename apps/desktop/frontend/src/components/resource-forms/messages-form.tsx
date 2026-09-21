@@ -46,7 +46,7 @@ export function MessageForm({ record, submitting, submitLabel, onSubmit, onCance
       body: body,
       kind: kind,
       attachment: attachment,
-    });
+    } as MessageInput);
   };
 
   return (

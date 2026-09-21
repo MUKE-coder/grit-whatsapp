@@ -20,8 +20,8 @@ export const Route = createFileRoute("/app/messages/")({
 });
 
 const COLUMNS: DataColumn[] = [
-  { key: "conversation", label: "Conversation", format: "text" },
-  { key: "sender", label: "Sender", format: "text" },
+  { key: "conversation_label", label: "Conversation", format: "text" },
+  { key: "sender_label", label: "Sender", format: "text" },
   { key: "body", label: "Body", format: "text" },
   { key: "kind", label: "Kind", format: "text" },
   { key: "attachment", label: "Attachment", format: "image" },
@@ -46,7 +46,7 @@ function MessagesPage() {
   // Resolve belongs_to ids to the related record's name for the table.
   const conversationMap = new Map((useConversations().data ?? []).map((o: any) => [String(o.id), String(o.name ?? o.title ?? o.id)]));
   const senderMap = new Map((useUsers().data ?? []).map((o: any) => [String(o.id), String(o.name ?? o.title ?? o.id)]));
-  const rows = items.map((r) => ({ ...r, conversation: conversationMap.get(String((r as any).conversation_id)) ?? "", sender: senderMap.get(String((r as any).sender_id)) ?? "" }));
+  const rows = items.map((r) => ({ ...r, conversation_label: conversationMap.get(String((r as any).conversation_id)) ?? "", sender_label: senderMap.get(String((r as any).sender_id)) ?? "" }));
 
   return (
     <div>

@@ -36,7 +36,7 @@ export function ConversationForm({ record, submitting, submitLabel, onSubmit, on
       is_group: isGroup,
       last_message_at: lastMessageAt,
       last_message_preview: lastMessagePreview,
-    });
+    } as ConversationInput);
   };
 
   return (

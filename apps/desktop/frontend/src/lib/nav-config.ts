@@ -36,6 +36,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
       { to: "/app", label: "Dashboard", icon: Home },
+      { to: "/app/chat", label: "Chats", icon: MessageSquare },
     ],
   },
   {
