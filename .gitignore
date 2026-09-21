@@ -67,3 +67,7 @@ coverage/
 *.log
 npm-debug.log*
 pnpm-debug.log*
+
+# TypeScript and Next.js build artefacts
+*.tsbuildinfo
+next-env.d.ts
