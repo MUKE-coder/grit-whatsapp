@@ -1,0 +1,22 @@
+# Build output
+build/bin/
+frontend/dist/
+frontend/node_modules/
+frontend/wailsjs/
+
+# Go
+*.exe
+*.test
+
+# Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
