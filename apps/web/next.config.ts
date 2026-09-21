@@ -43,6 +43,10 @@ function toOrigin(value: string): string {
 }
 
 const API_ORIGIN = toOrigin(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080");
+// The realtime socket is the API origin over ws:/wss:. CSP matches schemes
+// exactly, so the https: origin above does not cover it, and without this the
+// browser blocks every live update in production.
+const API_WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
 // Browser-facing origin of stored files. Uploads are presigned PUTs made
 // directly from the browser to object storage, and stored images are served
 // from the same host — both are blocked unless this origin is in connect-src
@@ -71,7 +75,7 @@ const csp = [
   // public-IP hint the API client fetches so local audit records show a real
   // address instead of ::1 — dev only, and it must be allowed here or the
   // browser logs a CSP violation on every page load.
-  "connect-src 'self' " + API_ORIGIN + " " + STORAGE_ORIGIN + (isDev ? " ws: wss: https://api.ipify.org" : ""),
+  "connect-src 'self' " + API_ORIGIN + " " + API_WS_ORIGIN + " " + STORAGE_ORIGIN + (isDev ? " ws: wss: https://api.ipify.org" : ""),
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",

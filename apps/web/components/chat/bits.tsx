@@ -62,18 +62,23 @@ const tickLabel: Record<Tick, string> = {
   read: "Read",
 };
 
-/** One grey tick sent, two grey delivered, two blue read. */
-export function Ticks({ tick }: { tick: Tick }) {
+/**
+ * One tick sent, two delivered, two highlighted read. onAccent is for ticks on
+ * an accent-coloured bubble, where the usual blue would not show.
+ */
+export function Ticks({ tick, onAccent = false }: { tick: Tick; onAccent?: boolean }) {
   const label = tickLabel[tick];
   const cls = "h-4 w-4";
+  const dim = onAccent ? "text-white/60" : "text-text-muted";
+  const read = onAccent ? "text-cyan-200" : "text-info";
   return (
     <span title={label} className="inline-flex">
       <span className="sr-only">{label}</span>
-      {tick === "sending" && <Clock aria-hidden className={cn(cls, "text-text-muted")} />}
-      {tick === "failed" && <AlertCircle aria-hidden className={cn(cls, "text-danger")} />}
-      {tick === "sent" && <Check aria-hidden className={cn(cls, "text-text-muted")} />}
-      {tick === "delivered" && <CheckCheck aria-hidden className={cn(cls, "text-text-muted")} />}
-      {tick === "read" && <CheckCheck aria-hidden className={cn(cls, "text-info")} />}
+      {tick === "sending" && <Clock aria-hidden className={cn(cls, dim)} />}
+      {tick === "failed" && <AlertCircle aria-hidden className={cn(cls, onAccent ? "text-white" : "text-danger")} />}
+      {tick === "sent" && <Check aria-hidden className={cn(cls, dim)} />}
+      {tick === "delivered" && <CheckCheck aria-hidden className={cn(cls, dim)} />}
+      {tick === "read" && <CheckCheck aria-hidden className={cn(cls, read)} />}
     </span>
   );
 }

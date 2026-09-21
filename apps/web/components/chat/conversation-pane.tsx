@@ -231,7 +231,7 @@ function Bubble({
         {message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}
         <p className={cn("mt-0.5 flex items-center justify-end gap-1 text-[11px]", mine ? "text-white/80" : "text-text-muted")}>
           <time dateTime={message.created_at}>{clockTime(message.created_at)}</time>
-          {tick && <Ticks tick={tick} />}
+          {tick && <Ticks tick={tick} onAccent />}
         </p>
         {message.pending === "failed" && (
           <button
