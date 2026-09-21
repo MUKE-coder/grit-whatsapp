@@ -1,7 +1,7 @@
 {
   "format": 1,
   "grit": "3.296.0",
-  "updatedAt": "2026-09-21T13:43:00Z",
+  "updatedAt": "2026-09-21T13:44:06Z",
   "files": {
     ".claude/skills/grit/SKILL.md": {
       "generator": "scaffold",
@@ -167,6 +167,36 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:b2f8ceaf049152fed80a5e64aa816eb497ae3508d827116b6ad85598e89056bd"
+    },
+    "apps/admin/app/(dashboard)/resources/conversations/[id]/page.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:09eb5aa24baa925b76c814fd0821b9bf68433007de61a736bf6c402d0bbc02f8"
+    },
+    "apps/admin/app/(dashboard)/resources/conversations/page.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:ff2bef247cf8353b03019817d4db82078d068e46f548c0006be02ab248aa63b5"
+    },
+    "apps/admin/app/(dashboard)/resources/messages/[id]/page.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:d1f241ce551aafd9669fea1e48c1d763c9a1fce2d5fa178c61815350699a502f"
+    },
+    "apps/admin/app/(dashboard)/resources/messages/page.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:11706fee774cdf511b126f550fb04c5fc4cce745d1858dfcacf101065c434187"
+    },
+    "apps/admin/app/(dashboard)/resources/participants/[id]/page.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:be8403b1a4f3206d06ef6cf60b42edc0aed34b121839982d0ff8d73b5c4a8e50"
+    },
+    "apps/admin/app/(dashboard)/resources/participants/page.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:65f0987da401f7663bd3191d8806714a872164b3784523d2817f3d1280b64ad4"
     },
     "apps/admin/app/(dashboard)/resources/users/[id]/page.tsx": {
       "generator": "scaffold",
@@ -1043,10 +1073,40 @@
       "grit": "3.296.0",
       "hash": "sha256:5bbd2eed17cb18ce377c807d876aaacdece4cc270919c92c9f1a88de6ee2ae59"
     },
+    "apps/admin/resources/conversations/conversations.custom.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:f33ff54e9ee5b0e1a49496611691fdb3b99c9c91670eeed7cd2eae0a98217342"
+    },
+    "apps/admin/resources/conversations/conversations.ts": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:2934e8f8939d7730da70eb45dcadf7a486ac3631e334cef6fcd2e1433f126538"
+    },
     "apps/admin/resources/index.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:7679457087f3da63999b15de159be82b08c5b3254ab81fc9f2378e367deea179"
+      "hash": "sha256:6af1a0cac9fd2718079cabc20d59f69ef8067f6c6a3745c07db5426bed6abdf6"
+    },
+    "apps/admin/resources/messages/messages.custom.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:72fc913404bee1acbbc306ff1f7af6cc0be9cba997f4d13877cf41c7ea0f5be0"
+    },
+    "apps/admin/resources/messages/messages.ts": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:c810f43358d0477ec53cec1d7c5f2047216607d8e3ecdfe425ef8a08c926d196"
+    },
+    "apps/admin/resources/participants/participants.custom.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:c80fe98346a55c5e3f8d4c95c62def09f55b375f2ccb8b30a23548ad96da07ad"
+    },
+    "apps/admin/resources/participants/participants.ts": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:3ad9e9b832fca98b18f1212e501337d84b95cd65d2ae9643be6d3ba3fbef18b7"
     },
     "apps/admin/resources/users/users.custom.tsx": {
       "generator": "scaffold",
@@ -1196,7 +1256,7 @@
     "apps/api/internal/authz/permissions.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:392c996ffb194d11824044e0d111a6560cbdc30613ea4bc55b45bd87922ee306"
+      "hash": "sha256:ec49791ab61749ebd29b7216a6820e529e43ad9dd65e09285557ed474a4b1943"
     },
     "apps/api/internal/authz/permissions_test.go": {
       "generator": "scaffold",
@@ -1478,6 +1538,16 @@
       "grit": "3.296.0",
       "hash": "sha256:1aef32de70199b70fdfbd10fa8fba03ae2c7d3a3c560ebbd537d14dea1c7ace2"
     },
+    "apps/api/internal/handlers/conversation.go": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:df4a172e2fc4bad2842865f570e9fa0a874070696030f23a59949938651c74ca"
+    },
+    "apps/api/internal/handlers/conversation_import.go": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:e7433915c2233a9a02d08b6774d9e970012aa459c5c6d87c4b05f739189abc17"
+    },
     "apps/api/internal/handlers/cron.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -1523,6 +1593,16 @@
       "grit": "3.296.0",
       "hash": "sha256:aa2659b430cb73cd14d9d637da08983c5e56641a8341f53ca0b184d5ac710a76"
     },
+    "apps/api/internal/handlers/message.go": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:e9170227621ee54c160bfdd354aa7c20146929f1cd1a361de4b55466c2d33223"
+    },
+    "apps/api/internal/handlers/message_import.go": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:f4e578e2d8e1261e583d4fd4de580f09b7b4a2a35a308a456a968e53586cc4eb"
+    },
     "apps/api/internal/handlers/notification.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -1537,6 +1617,16 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:cf85726764da0b49c7d820919474c9a0c1cd4f97b8db2e254b360eeba68c3de1"
+    },
+    "apps/api/internal/handlers/participant.go": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:1be5a584e484373a833fc42cbb699ea8da176cbf0da6180446a455256737bce4"
+    },
+    "apps/api/internal/handlers/participant_import.go": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:55dfb715fc60d1d7de724b262569ea03ae0d6885b7db6a93ca87ace5ee264b3f"
     },
     "apps/api/internal/handlers/passkey.go": {
       "generator": "scaffold",
@@ -2003,6 +2093,11 @@
       "grit": "3.296.0",
       "hash": "sha256:6514cb95d874cfb46f00edca0e2d7964e957dd93e6f2ad7da95ed215358d0949"
     },
+    "apps/api/internal/models/conversation.go": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:73dfa18fb931dfbb51fc860b78e40f8f339c4fbe92553768422766d590efeb6b"
+    },
     "apps/api/internal/models/dashboard_layout.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -2048,6 +2143,11 @@
       "grit": "3.296.0",
       "hash": "sha256:b5b3f71973bf46758c9126c0e8a33c04185d8d633061a0579c242cd5e7f3d518"
     },
+    "apps/api/internal/models/message.go": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:dc3f43ba9e2290901a8f5eb9dc46f48c861af00751a5f6d3dbbc9310be019698"
+    },
     "apps/api/internal/models/notification.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -2057,6 +2157,11 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:5995a30bb8437948e634232fdc79ddd228125b12fa90a4c033c336ac79f195d8"
+    },
+    "apps/api/internal/models/participant.go": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:f9015c2dc789f0b52396643d0c0f97d711841cbac259d4cd532b07cdf1e2100d"
     },
     "apps/api/internal/models/passkey.go": {
       "generator": "scaffold",
@@ -2116,7 +2221,7 @@
     "apps/api/internal/models/user.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:47af0f50e54e59a63ff408c7895c0760fc06b8c3c6fb9b252eaf3d54c0005bc1"
+      "hash": "sha256:a8b927efac791634959961f250e16960399854c5d98d85bc51577da7139f650d"
     },
     "apps/api/internal/models/user_activity.go": {
       "generator": "scaffold",
@@ -2276,7 +2381,22 @@
     "apps/api/internal/routes/apidocs.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:81fe8a6ad52e3f955d8cffe2a6078d3b1d7487edc0f0a9562ee36d714fe4aa4f"
+      "hash": "sha256:988f4043da3ec1efe8ad0e83405204bfd56816fe2e35716c4c5d10570b3e5213"
+    },
+    "apps/api/internal/routes/conversation_routes.go": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:7e4e66a591e2bfadd542b04c62bd28ec2df839a0fd91d1d984702787cd8557fd"
+    },
+    "apps/api/internal/routes/message_routes.go": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:106e90c3eb915654f805a5fddbc2fef953c58d0cbf866488bdf25ffd1815f301"
+    },
+    "apps/api/internal/routes/participant_routes.go": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:abcc4cf54703bb044ea772503e830adcb92aa51e09263acb3d0633ffe5177b39"
     },
     "apps/api/internal/routes/resources.go": {
       "generator": "scaffold",
@@ -2286,7 +2406,7 @@
     "apps/api/internal/routes/routes.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:b8afd0e0fe36f2201325dfa9c1298becac4074a7b5886780db1e3017e59d2934"
+      "hash": "sha256:d82227b0cb0369abc6fce6f589cb98b512ca749e35c807e137063c5843a84798"
     },
     "apps/api/internal/safefetch/safefetch.go": {
       "generator": "scaffold",
@@ -2358,6 +2478,16 @@
       "grit": "3.296.0",
       "hash": "sha256:be1938b8571590fa09576f9f25039bf69992afceb111e5b8501b2f7d6d7ff9c8"
     },
+    "apps/api/internal/services/conversation.go": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:9a5a5f1a6acc66758b909ccb24243ca74e0d74bdb6047b1fcdcba4074d950187"
+    },
+    "apps/api/internal/services/conversation_import.go": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:b551bd08d0f7c3f753a4ee3821400cbe7bf638e285cafd00ae4decd118ec292f"
+    },
     "apps/api/internal/services/day_bucket.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -2381,7 +2511,7 @@
     "apps/api/internal/services/form_share_dispatch.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:66adc77ad631137ab2deefb41f235b4c31e26a44d2a44b6b137fb56fd38bbb0a"
+      "hash": "sha256:eb8db33dac846bc2bd789882216245fe32d99dd8602bcf1f90d0a2f0e8565290"
     },
     "apps/api/internal/services/gdpr.go": {
       "generator": "scaffold",
@@ -2393,6 +2523,16 @@
       "grit": "3.296.0",
       "hash": "sha256:941e79b51aa875ea1ed3e77eebcc5fe8ebf52f24d5e68ace0fc44879fcf387ec"
     },
+    "apps/api/internal/services/message.go": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:9c983fbef40c8d1e865e84a62ab47d51981ad1d8fac3707af2ad4ee5c36686ed"
+    },
+    "apps/api/internal/services/message_import.go": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:54fa1e4d64a50929503f9814967276efdb9d40a872af7f946469c6d41157cdab"
+    },
     "apps/api/internal/services/ocsf.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -2402,6 +2542,16 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:466e18dcabc0913d53c53d92f4d8413844a2e4fb16f3764d6978d31bca1aafe9"
+    },
+    "apps/api/internal/services/participant.go": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:d3433d7e7ad4a6ad414ef905b6373ca8d6f38977eb1a796c199d2dbda4eebc6e"
+    },
+    "apps/api/internal/services/participant_import.go": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:d7b68692bb9b93ef81e84b29b1fd659e240990dda37fb42eea91ef6d30611043"
     },
     "apps/api/internal/services/passkey.go": {
       "generator": "scaffold",
@@ -2441,7 +2591,7 @@
     "apps/api/internal/services/resource_stats_dispatch.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:f19ef0e8f6f5661bd1bc8751a71f3ae307ba6793a2cf51d9c2b0b40437e05042"
+      "hash": "sha256:1077aefeb5bb6b5ea9d95e4161167aaab94c616a95d7d499d834eb2669588b14"
     },
     "apps/api/internal/services/saml.go": {
       "generator": "scaffold",
@@ -2636,7 +2786,7 @@
     "apps/desktop/app.go": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:6c4ed69adafaa4cec1ba183f83b9c4fd038cff401467c800a912f8ba9f2ea519"
+      "hash": "sha256:15a59cd34232608dbc68c0cd360d1db7e3ece891da4ebd654489d23ceb73f935"
     },
     "apps/desktop/frontend/index.html": {
       "generator": "scaffold",
@@ -2778,6 +2928,21 @@
       "grit": "3.296.0",
       "hash": "sha256:702ff7c6b2845c74d767a75822cae1477f8e8cb67f706b49d577878a870f9f13"
     },
+    "apps/desktop/frontend/src/components/resource-forms/conversations-form.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:ef562409dbbc527165e74a28e3d0993a4d446d9af2da9c7d97d6e75eb496d8c5"
+    },
+    "apps/desktop/frontend/src/components/resource-forms/messages-form.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:2dc49995edf130f4c2270814bacfc1904bb59208fa08a82acbbac8ff4ba04327"
+    },
+    "apps/desktop/frontend/src/components/resource-forms/participants-form.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:ef854dd707a3822ccee69736979a63b68c26d58ae4c1b5feab414c96f9f6396b"
+    },
     "apps/desktop/frontend/src/components/searchable-select.tsx": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -2858,10 +3023,25 @@
       "grit": "3.296.0",
       "hash": "sha256:44f305c87099774a4d716f73c2a49a9c88dd6fcca9b29c75fc9aeca9dca1b032"
     },
+    "apps/desktop/frontend/src/hooks/use-conversations.ts": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:9800368f8f4d6babf402e15b7f402e491444eb74efdb9005cb2675bb853b7036"
+    },
+    "apps/desktop/frontend/src/hooks/use-messages.ts": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:df1f044f51bdb20d56b2f754cbe2fbed590252e71a758fde69df48c12b2cc1ba"
+    },
     "apps/desktop/frontend/src/hooks/use-online-status.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:25a033c27cc2f4d2159313e6788ebcc8ca1181b55e4f3f3d0138e3c4ffe3b3b2"
+    },
+    "apps/desktop/frontend/src/hooks/use-participants.ts": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:fb948d2052777bee07357a356185f9de49d8ad615cc60831bbb0b9be5762dab7"
     },
     "apps/desktop/frontend/src/hooks/use-pending-uploads.ts": {
       "generator": "scaffold",
@@ -2911,7 +3091,7 @@
     "apps/desktop/frontend/src/lib/nav-config.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:1679c3f3e19a2954a1796daa06319f2413ae267dd50e43efc48a79326f8a981e"
+      "hash": "sha256:abc762a971bd64bee1c8185ac4a5e5d7343717b887079f80fb62e081b2ad9c0a"
     },
     "apps/desktop/frontend/src/lib/query-client.ts": {
       "generator": "scaffold",
@@ -2968,6 +3148,21 @@
       "grit": "3.296.0",
       "hash": "sha256:15f5e6d6d5afac10cc57c1e145def35fb4c5af3fb8073222be12af7a86a847cd"
     },
+    "apps/desktop/frontend/src/routes/app/conversations.$id.edit.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:cc7d2e2f6f05179fdac2e4635596cb627fa2c92e2755632406542e87dcf98955"
+    },
+    "apps/desktop/frontend/src/routes/app/conversations.index.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:4e1345d430538d7ac24c87329cab20d954056be63663e325b4643017701d80cf"
+    },
+    "apps/desktop/frontend/src/routes/app/conversations.new.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:afd4e0cd6f9f40d18fca566173a2e826f1658836e171adf80224ddd054fef980"
+    },
     "apps/desktop/frontend/src/routes/app/data-backup.tsx": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -2977,6 +3172,36 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:bf3eee195b08740787b1fa893e3a4c09a6211f355dbaac8360c3ee7560bbbf78"
+    },
+    "apps/desktop/frontend/src/routes/app/messages.$id.edit.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:e7ace1799d5c0fdd678d5f64757415f24413e1b93f36ddfad082f85700e240c5"
+    },
+    "apps/desktop/frontend/src/routes/app/messages.index.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:284d66428cec28913d8d750f427049d9b186fa5212d7cda1bc06b87c4fb4d4e7"
+    },
+    "apps/desktop/frontend/src/routes/app/messages.new.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:29db2a12da2ca710e8722888a9ffd70438be3ec679cd2cff07674de22330f091"
+    },
+    "apps/desktop/frontend/src/routes/app/participants.$id.edit.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:311ac0b2d40b5d6678a27796a1492bf74505c6be1641d33a22cdeaa88c0b04ac"
+    },
+    "apps/desktop/frontend/src/routes/app/participants.index.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:cff9183ee9296fb3115f94e3ce4ac10d194fa05015d0f4dc79e0191ec052c6bb"
+    },
+    "apps/desktop/frontend/src/routes/app/participants.new.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:194380d263c17f0f33430e33a9a9fa46959168b9cd5dfdaa9ba918c0d4766f3f"
     },
     "apps/desktop/frontend/src/routes/app/profile.tsx": {
       "generator": "scaffold",
@@ -3223,6 +3448,26 @@
       "grit": "3.296.0",
       "hash": "sha256:8d43154da1d38f72ab96bc56f6faba514719a85a6dad4c369fb6f5739f8a448b"
     },
+    "apps/expo/app/conversations/[id].tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:59e4175f34730472f0b5b133b70a36206d1e9b89a622c04790319dc783f42968"
+    },
+    "apps/expo/app/conversations/edit/[id].tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:8ff8bfddf9519c9f68a1f868083cb07294cb989aad4ba12891557c08dde34854"
+    },
+    "apps/expo/app/conversations/index.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:63faa4665072f780f52331768c635321e90c4b38beddae0d04c07160874b7e94"
+    },
+    "apps/expo/app/conversations/new.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:3c241cf49e020cc48696ce1384aae52a8ebf79eba6f510cbc2f81caf5c2b8e6b"
+    },
     "apps/expo/app/explore/analytics.tsx": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -3253,6 +3498,46 @@
       "grit": "3.296.0",
       "hash": "sha256:1898f444b177469bc1591730d9dcc91e8f8c2390eafccf0637de574de58c625d"
     },
+    "apps/expo/app/messages/[id].tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:a80a517c9cef4e513d091f11406abb62d88ae7de32bbe1cebfdd9db8d759025e"
+    },
+    "apps/expo/app/messages/edit/[id].tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:b49f1c3f6773c610a82bb9109ec9a541470af4cb915dde63b2a6438815b5c5e3"
+    },
+    "apps/expo/app/messages/index.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:55e9464ab68e0c1e00f5b33cf11eab4545eb710bab0e281a9ac300ecb0c84c7b"
+    },
+    "apps/expo/app/messages/new.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:92fa339f345c7438295530e501a815f54590e0e6800a2a085cd3d1c3484c2852"
+    },
+    "apps/expo/app/participants/[id].tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:190a93e3772f9c4968311d08dd338d95f4d2a477c2e664db183cacd431e74e36"
+    },
+    "apps/expo/app/participants/edit/[id].tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:616d69bc5318ea096fbc06e28eafb537ec07fe4b46d4387a732e593a88789431"
+    },
+    "apps/expo/app/participants/index.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:2f04e27f2979d0abf592fdb7d572765ed9429a331da907934f19d8fc56881c4f"
+    },
+    "apps/expo/app/participants/new.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:cc875715dfad673281e5f3f0923f68f9a2ee313fd63c51e63bf791cd44b19599"
+    },
     "apps/expo/app/roles/[id].tsx": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -3278,23 +3563,38 @@
       "grit": "3.296.0",
       "hash": "sha256:06025e3715caa4cd04ccd7b486bbd45a67ab540a793c360efba206db50f60309"
     },
+    "apps/expo/components/resource-forms/conversations-form.tsx": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:4c46cbae9030d0d7271ef6364cb171ea21320a10e7ee1c3c5236354ce035e826"
+    },
+    "apps/expo/components/resource-forms/messages-form.tsx": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:dda489d85f515c3675b16a4ed58a5d55a3dd5a5247b5c115a3201226a040b106"
+    },
+    "apps/expo/components/resource-forms/participants-form.tsx": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:bde8214eceb34434d7e386be5ec87eb69ba4f7c14336b0e7a4a031ccbf01a3dc"
+    },
     "apps/expo/components/ui/form-sheet.tsx": {
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:b1a2518b926b7278b8c74a4e92e00b0f390c7b4413edb1b528a411d481363b56"
     },
     "apps/expo/components/ui/image-picker-sheet.tsx": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:592ac8cc04d46245674db7c620cc2544dfe4606c26f3509848535abb23417b94"
     },
     "apps/expo/components/ui/import-progress-banner.tsx": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:84116241d816e325276e8324a234212d5b76653f2a061319fd3cf7796f743e51"
     },
     "apps/expo/components/ui/import-sheet.tsx": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:1ad95897f17a4cc99a1293c8ac6a79a5badbe314dcb51a99c64a76342152a70c"
     },
@@ -3304,7 +3604,7 @@
       "hash": "sha256:28d222bdac9eb60ad60de7af0f959bb9a599de109352dc8e1d6de15ce2727316"
     },
     "apps/expo/components/ui/relation-select.tsx": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:2dfe2a8493d14fcea3207914bf2e717931f0755e73519d41329d499b2249b65c"
     },
@@ -3322,6 +3622,21 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:4b0efb8d8dd22fa473cd20cfd1849a8bafe405df7bd454d6f619354cc56c5874"
+    },
+    "apps/expo/hooks/use-conversations.ts": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:11bb0b7884a9462ac7b0589784d2c609822f6bd4fe7e19234cf3ab1780373dbc"
+    },
+    "apps/expo/hooks/use-messages.ts": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:957fc798cc05a7b59cf75e42ebc0dcc7c20fa0559242f304b6e8e533ce174a93"
+    },
+    "apps/expo/hooks/use-participants.ts": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:a143cb29a2737cf8af47c705f59a55c0b5ec35022766b77d43d63f92c6475524"
     },
     "apps/expo/hooks/use-permissions.ts": {
       "generator": "scaffold",
@@ -3349,22 +3664,22 @@
       "hash": "sha256:194bca40e0f9ccb95542b9d7cb2fcc266280299c6e2dfcc0d23f0f0efc9d2029"
     },
     "apps/expo/lib/format.ts": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:057a2a9c27db33e359c861202973cbd539be75ab884e7845c025af873c7a64d8"
     },
     "apps/expo/lib/images.ts": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:3cf0b9400baed081eaaf89003ffe9e956ceb116a1d127d2aae78beffda0f809a"
     },
     "apps/expo/lib/import-progress.ts": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:dd4b14af4a6dda904d370a6bec2f6ba9a077e012e54a0bda7c92e0643c75c436"
     },
     "apps/expo/lib/import.ts": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:4ad35a053eb6a888218c37c15ac480ef5ecb19a4455bccd7ea61f65fad057d3e"
     },
@@ -3389,7 +3704,7 @@
       "hash": "sha256:3da1107a3c05d49213611bc250258e76bd9b58b4966e601bf19b677dd2bceb25"
     },
     "apps/expo/lib/upload.ts": {
-      "generator": "scaffold",
+      "generator": "resource:Message",
       "grit": "3.296.0",
       "hash": "sha256:30a4c3f75a67e6e91dedf8422d2b20dc832924c9034fa837b30eb138c63fab33"
     },
@@ -3518,6 +3833,21 @@
       "grit": "3.296.0",
       "hash": "sha256:6b6e1d9eff61537a1b67a6bfee7f026cd8be0b634b7f79b88d118aaa168e1256"
     },
+    "apps/web/hooks/use-conversations.ts": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:b9848ca8fcf5c900a0f8e892228382228bdd29ad740a18281ef78cb07525e32e"
+    },
+    "apps/web/hooks/use-messages.ts": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:059680ecd38359da4aecd0982aa657851a8d862f96caaf2a59245288673131f6"
+    },
+    "apps/web/hooks/use-participants.ts": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:c25953e2483f2dbfe23bdc6feba0933b91fcd0d798e92de1d46426f90dc52631"
+    },
     "apps/web/hooks/use-realtime.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -3631,7 +3961,7 @@
     "packages/shared/constants/index.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:82c32bd2a8f79e678b4ca4e62bb1700cab071174ab782f38af2e7a355eea0776"
+      "hash": "sha256:219dd18b96b2131e2cca698fc591511580da3b0c635e0df0d840f2784079eb52"
     },
     "packages/shared/package.json": {
       "generator": "scaffold",
@@ -3642,6 +3972,11 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:d98e6a43d0e10f3a125196a771599857a8cfa3c4aba77f3eab1f34b2de6f2b88"
+    },
+    "packages/shared/schemas/conversation.ts": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:235c938e1b9b9354c11baaf5ec243d96568d31cbb312f9574ae8e69a3d8712d6"
     },
     "packages/shared/schemas/field-formats.ts": {
       "generator": "scaffold",
@@ -3656,12 +3991,22 @@
     "packages/shared/schemas/index.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:e18a933ca2768cfce3ee5ce140a9a307d734a97cd8343c9fc6819dcd0c4d940c"
+      "hash": "sha256:eca30e4666151a599fe1bdc4eb4afc2af1e495681ab8e4750c9a8fe572612bf9"
+    },
+    "packages/shared/schemas/message.ts": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:811800c6681fce3d46739a162c208946c55a59d620ffa988fb8055dea86e9307"
     },
     "packages/shared/schemas/money.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:90288efa52660e9e3115d8450f24f8c0566a5d404c6b3f6467393fbaa7a6805e"
+    },
+    "packages/shared/schemas/participant.ts": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:9973600b8b06a74b6afa40feb56f518e4551a2ae238c3f38929b440e7f06e490"
     },
     "packages/shared/schemas/phone.ts": {
       "generator": "scaffold",
@@ -3703,6 +4048,11 @@
       "grit": "3.296.0",
       "hash": "sha256:1261cf6b4508f5a6bdd136fac4dd5c726d37cb0d1aaeeb8b65a8673be205fb3f"
     },
+    "packages/shared/types/conversation.ts": {
+      "generator": "resource:Conversation",
+      "grit": "3.296.0",
+      "hash": "sha256:51284d7a2d486482f1c4922ae6e846cf34fcc1ea2c2aa20c2136de825446e6d5"
+    },
     "packages/shared/types/errors.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
@@ -3726,7 +4076,12 @@
     "packages/shared/types/index.ts": {
       "generator": "scaffold",
       "grit": "3.296.0",
-      "hash": "sha256:eace0e632050ffe110caecab4045dc08dd603388fbfa43d38716efcbadbe07b6"
+      "hash": "sha256:0124b0bfa3ea87dd39ca11eaeba48ddabc3ed8de4fd7e79e7aeb0d1037fdc52f"
+    },
+    "packages/shared/types/message.ts": {
+      "generator": "resource:Message",
+      "grit": "3.296.0",
+      "hash": "sha256:444d9080b76a95a0d18cf6c4bac5183850f45aaa78bddc6de663817f48ed1b3d"
     },
     "packages/shared/types/money.ts": {
       "generator": "scaffold",
@@ -3737,6 +4092,11 @@
       "generator": "scaffold",
       "grit": "3.296.0",
       "hash": "sha256:8d460fc3972aeb8d9379bffb967f95f159af26f3d231fa0f839b71a24580c4f2"
+    },
+    "packages/shared/types/participant.ts": {
+      "generator": "resource:Participant",
+      "grit": "3.296.0",
+      "hash": "sha256:5c9d9b7935c5ebd6a49c51e9cbf59c0ff2741feca331430b1b1211fe034a8546"
     },
     "packages/shared/types/sso-connection.ts": {
       "generator": "scaffold",

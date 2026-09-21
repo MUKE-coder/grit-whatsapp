@@ -379,7 +379,7 @@ func mountStudio(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 				cfg.GORMStudioUsername: cfg.GORMStudioPassword,
 			})
 		}
-		studio.Mount(r, db, []interface{}{&models.User{}, &models.Upload{}, &models.Blog{} /* grit:studio */}, studioCfg)
+		studio.Mount(r, db, []interface{}{&models.User{}, &models.Upload{}, &models.Blog{}, &models.Conversation{}, &models.Participant{}, &models.Message{} /* grit:studio */}, studioCfg)
 		log.Println("GORM Studio mounted at /studio")
 	}
 }
@@ -629,6 +629,20 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	// the origins CORS allows.
 	realtime.AllowedOrigins = corsOrigins
 
+	// Chat (the WhatsApp blueprint): the service, and who may join its channels.
+	chatService := &services.ChatService{DB: db, Hub: realtimeHub}
+	chatHandler := &handlers.ChatHandler{Chat: chatService}
+	// private- and presence-conversations.<id>: members only. Typing
+	// indicators travel on the private one as client events.
+	realtime.Channel("conversations.{id}", func(c realtime.ChannelContext) bool {
+		return chatService.IsMember(c.Param("id"), c.UserID)
+	})
+	// presence-users.<id>: each user joins their own while the app is open, and
+	// anyone they share a conversation with may join it to see them online.
+	realtime.Channel("users.{id}", func(c realtime.ChannelContext) bool {
+		return chatService.SharesConversation(c.UserID, c.Param("id"))
+	})
+
 	// In-app Security + Observability dashboards — read from Sentinel/Pulse APIs
 	// over loopback. notificationHandler powers the admin bell.
 	notificationHandler := &handlers.NotificationHandler{DB: db}
@@ -661,6 +675,9 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	// Both have their own APIs with their own checks, and syncing them let any
 	// account make itself ADMIN.
 	syncRegistry.Register("blogs", &models.Blog{})
+	syncRegistry.Register("conversations", &models.Conversation{})
+	syncRegistry.Register("participants", &models.Participant{})
+	syncRegistry.Register("messages", &models.Message{})
 	// grit:sync
 	syncHandler := handlers.NewSyncHandler(db, syncRegistry)
 	// v3.31.68 — shared background CSV import status endpoint
@@ -973,6 +990,18 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 		protected.POST("/uploads/complete", uploadHandler.CompleteUpload)
 		protected.GET("/uploads", uploadHandler.List)
 		protected.GET("/uploads/stats", uploadHandler.Stats)
+
+		chat := protected.Group("/chat")
+		chat.GET("/users", chatHandler.Users)
+		chat.GET("/conversations", chatHandler.Conversations)
+		chat.POST("/conversations/direct", chatHandler.Direct)
+		chat.POST("/conversations/group", chatHandler.Group)
+		chat.GET("/conversations/:id", chatHandler.Conversation)
+		chat.GET("/conversations/:id/messages", chatHandler.Messages)
+		chat.POST("/conversations/:id/messages", chatHandler.Send)
+		chat.POST("/conversations/:id/delivered", chatHandler.Delivered)
+		chat.POST("/conversations/:id/read", chatHandler.Read)
+		chat.PUT("/conversations/:id/mute", chatHandler.Mute)
 		protected.GET("/uploads/:id", uploadHandler.GetByID)
 		// The file itself, through the API: private files too, on any driver.
 		protected.GET("/uploads/:id/download", uploadHandler.Download)

@@ -118,6 +118,48 @@ func coreModules() []Module {
 func generatedModules() []Module {
 	return []Module{
 		// grit:perms:auto-start
+		{
+			Key:  "conversations",
+			Name: "Conversations",
+			Groups: []Group{
+				{
+					Key:  "conversations",
+					Name: "Conversations",
+					Features: []Feature{
+						{Key: "conversations", Name: "Conversations", Actions: AllActions},
+					},
+				},
+			},
+		},
+
+		{
+			Key:  "participants",
+			Name: "Participants",
+			Groups: []Group{
+				{
+					Key:  "participants",
+					Name: "Participants",
+					Features: []Feature{
+						{Key: "participants", Name: "Participants", Actions: AllActions},
+					},
+				},
+			},
+		},
+
+		{
+			Key:  "messages",
+			Name: "Messages",
+			Groups: []Group{
+				{
+					Key:  "messages",
+					Name: "Messages",
+					Features: []Feature{
+						{Key: "messages", Name: "Messages", Actions: AllActions},
+					},
+				},
+			},
+		},
+
 		// grit:perms:auto-end
 	}
 }

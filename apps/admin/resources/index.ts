@@ -1,5 +1,8 @@
 import { usersResource } from "./users/users";
 import { blogsResource } from "./blogs/blogs";
+import { conversationResource } from "./conversations/conversations";
+import { participantResource } from "./participants/participants";
+import { messageResource } from "./messages/messages";
 // grit:resources
 
 import type { ResourceDefinition } from "@/lib/resource";
@@ -7,6 +10,9 @@ import type { ResourceDefinition } from "@/lib/resource";
 export const resources: ResourceDefinition[] = [
   usersResource,
   blogsResource,
+  conversationResource,
+  participantResource,
+  messageResource,
   // grit:resource-list
 ];
 

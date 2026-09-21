@@ -17,6 +17,9 @@ const resources: LinkItem[] = [
   { title: "Users", description: "Manage user accounts", icon: "people-outline", color: "#6c5ce7", route: "/explore/users" },
   { title: "Blogs", description: "Posts and articles", icon: "newspaper-outline", color: "#00b894", route: "/blogs" },
   // grit:mobile-resources
+  { title: "Messages", description: "Browse and manage messages", icon: "cube-outline", color: "#6c5ce7", route: "/messages" },
+  { title: "Participants", description: "Browse and manage participants", icon: "cube-outline", color: "#6c5ce7", route: "/participants" },
+  { title: "Conversations", description: "Browse and manage conversations", icon: "cube-outline", color: "#6c5ce7", route: "/conversations" },
 ];
 
 const tools: LinkItem[] = [

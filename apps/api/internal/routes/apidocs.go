@@ -37,7 +37,7 @@ func registerAPIDocs(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		// inside this app. They are not your API, and 111 of their routes in
 		// the reference buries the ~140 that are yours.
 		ExcludePrefixes: []string{"/pulse", "/sentinel", "/studio", "/docs"},
-		Models:          []interface{}{&models.User{}, &models.Upload{}, &models.Blog{} /* grit:docs:models */},
+		Models:          []interface{}{&models.User{}, &models.Upload{}, &models.Blog{}, &models.Conversation{}, &models.Participant{}, &models.Message{} /* grit:docs:models */},
 		Auth: gindocs.AuthConfig{
 			Type:         gindocs.AuthBearer,
 			BearerFormat: "JWT",
@@ -57,6 +57,90 @@ func registerAPIDocs(r *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	docsRedirectAndStreamRoutes(docs)
 
 	// grit:docs:routes — "grit generate resource" registers each resource here.
+	docs.Route("GET /api/v1/conversations").
+		Summary("List conversations").
+		Response(200, []models.Conversation{}, "A page of conversations").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected")
+	docs.Route("POST /api/v1/conversations").
+		Summary("Create a conversation").
+		RequestBody(handlers.CreateConversationRequest{}).
+		Response(201, models.Conversation{}, "Created").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(422, handlers.ErrorResponse{}, "VALIDATION_ERROR: a field is missing or not acceptable; error.details maps each field to why")
+	docs.Route("GET /api/v1/conversations/:id").
+		Summary("Get one conversation").
+		Response(200, models.Conversation{}, "The conversation").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see")
+	docs.Route("PUT /api/v1/conversations/:id").
+		Summary("Update a conversation").
+		RequestBody(handlers.UpdateConversationRequest{}).
+		Response(200, models.Conversation{}, "Updated").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see").
+		Response(422, handlers.ErrorResponse{}, "VALIDATION_ERROR: a field is missing or not acceptable; error.details maps each field to why").
+		Response(409, handlers.ErrorResponse{}, "VERSION_CONFLICT: the row changed since the version in If-Match; the body carries the current one")
+	docs.Route("DELETE /api/v1/conversations/:id").
+		Summary("Delete a conversation").
+		Response(204, nil, "Deleted").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see")
+	docs.Route("GET /api/v1/participants").
+		Summary("List participants").
+		Response(200, []models.Participant{}, "A page of participants").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected")
+	docs.Route("POST /api/v1/participants").
+		Summary("Create a participant").
+		RequestBody(handlers.CreateParticipantRequest{}).
+		Response(201, models.Participant{}, "Created").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(422, handlers.ErrorResponse{}, "VALIDATION_ERROR: a field is missing or not acceptable; error.details maps each field to why")
+	docs.Route("GET /api/v1/participants/:id").
+		Summary("Get one participant").
+		Response(200, models.Participant{}, "The participant").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see")
+	docs.Route("PUT /api/v1/participants/:id").
+		Summary("Update a participant").
+		RequestBody(handlers.UpdateParticipantRequest{}).
+		Response(200, models.Participant{}, "Updated").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see").
+		Response(422, handlers.ErrorResponse{}, "VALIDATION_ERROR: a field is missing or not acceptable; error.details maps each field to why").
+		Response(409, handlers.ErrorResponse{}, "VERSION_CONFLICT: the row changed since the version in If-Match; the body carries the current one")
+	docs.Route("DELETE /api/v1/participants/:id").
+		Summary("Delete a participant").
+		Response(204, nil, "Deleted").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see")
+	docs.Route("GET /api/v1/messages").
+		Summary("List messages").
+		Response(200, []models.Message{}, "A page of messages").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected")
+	docs.Route("POST /api/v1/messages").
+		Summary("Create a message").
+		RequestBody(handlers.CreateMessageRequest{}).
+		Response(201, models.Message{}, "Created").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(422, handlers.ErrorResponse{}, "VALIDATION_ERROR: a field is missing or not acceptable; error.details maps each field to why")
+	docs.Route("GET /api/v1/messages/:id").
+		Summary("Get one message").
+		Response(200, models.Message{}, "The message").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see")
+	docs.Route("PUT /api/v1/messages/:id").
+		Summary("Update a message").
+		RequestBody(handlers.UpdateMessageRequest{}).
+		Response(200, models.Message{}, "Updated").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see").
+		Response(422, handlers.ErrorResponse{}, "VALIDATION_ERROR: a field is missing or not acceptable; error.details maps each field to why").
+		Response(409, handlers.ErrorResponse{}, "VERSION_CONFLICT: the row changed since the version in If-Match; the body carries the current one")
+	docs.Route("DELETE /api/v1/messages/:id").
+		Summary("Delete a message").
+		Response(204, nil, "Deleted").
+		Response(401, handlers.ErrorResponse{}, "UNAUTHORIZED: the access token is missing, expired or rejected").
+		Response(404, handlers.ErrorResponse{}, "NOT_FOUND: no such row, or none this caller may see")
 	// grit:docs:routes:end
 	log.Println("API docs available at /docs")
 }

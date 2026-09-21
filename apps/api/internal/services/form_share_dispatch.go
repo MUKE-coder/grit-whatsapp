@@ -6,6 +6,10 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+
+	"encoding/json"
+
+	"whatsapp/apps/api/internal/models"
 )
 
 // SharedResourceSubmission is the result of a public form submission —
@@ -28,6 +32,39 @@ type SharedResourceSubmission struct {
 // the parameter is named "fields" rather than "body".
 func SubmitSharedForm(db *gorm.DB, resourceName string, fields map[string]interface{}) (*SharedResourceSubmission, error) {
 	switch resourceName {
+	case "Conversation":
+		item := &models.Conversation{}
+		body, _ := json.Marshal(fields)
+		if err := json.Unmarshal(body, item); err != nil {
+			return nil, fmt.Errorf("decoding Conversation body: %w", err)
+		}
+		if err := db.Create(item).Error; err != nil {
+			return nil, fmt.Errorf("creating Conversation: %w", err)
+		}
+		return &SharedResourceSubmission{ID: item.ID, Label: item.Title}, nil
+
+	case "Participant":
+		item := &models.Participant{}
+		body, _ := json.Marshal(fields)
+		if err := json.Unmarshal(body, item); err != nil {
+			return nil, fmt.Errorf("decoding Participant body: %w", err)
+		}
+		if err := db.Create(item).Error; err != nil {
+			return nil, fmt.Errorf("creating Participant: %w", err)
+		}
+		return &SharedResourceSubmission{ID: item.ID, Label: item.ID}, nil
+
+	case "Message":
+		item := &models.Message{}
+		body, _ := json.Marshal(fields)
+		if err := json.Unmarshal(body, item); err != nil {
+			return nil, fmt.Errorf("decoding Message body: %w", err)
+		}
+		if err := db.Create(item).Error; err != nil {
+			return nil, fmt.Errorf("creating Message: %w", err)
+		}
+		return &SharedResourceSubmission{ID: item.ID, Label: item.ID}, nil
+
 	// grit:form-share:dispatch
 	default:
 		return nil, fmt.Errorf("public submission disabled for %q (no dispatch case registered)", resourceName)
@@ -60,6 +97,12 @@ type PublicFieldInfo struct {
 // `grit generate resource` at the marker below.
 func RegisteredResources() []string {
 	return []string{
+		"Conversation",
+
+		"Participant",
+
+		"Message",
+
 		// grit:form-share:registered
 	}
 }
@@ -71,6 +114,15 @@ func RegisteredResources() []string {
 // marker comment inside the switch.
 func PublicFields(resourceName string) []PublicFieldInfo {
 	switch resourceName {
+	case "Conversation":
+		return reflectPublicFields(&models.Conversation{})
+
+	case "Participant":
+		return reflectPublicFields(&models.Participant{})
+
+	case "Message":
+		return reflectPublicFields(&models.Message{})
+
 	// grit:form-share:fields
 	default:
 		return nil

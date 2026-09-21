@@ -155,6 +155,9 @@ func Models() []interface{} {
 		// AutoMigrate creates it and the backup writer includes it; an outbox
 		// missing from a backup loses events nobody knows were pending.
 		&OutboxMessage{},
+		&Conversation{},
+		&Participant{},
+		&Message{},
 		// grit:models
 	}
 }

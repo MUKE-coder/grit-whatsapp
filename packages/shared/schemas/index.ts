@@ -27,4 +27,22 @@ export {
   type ProfessionalInfoInput,
   type ChangePasswordInput,
 } from "./profile";
+export {
+  CreateConversationSchema,
+  UpdateConversationSchema,
+  type CreateConversationInput,
+  type UpdateConversationInput,
+} from "./conversation";
+export {
+  CreateParticipantSchema,
+  UpdateParticipantSchema,
+  type CreateParticipantInput,
+  type UpdateParticipantInput,
+} from "./participant";
+export {
+  CreateMessageSchema,
+  UpdateMessageSchema,
+  type CreateMessageInput,
+  type UpdateMessageInput,
+} from "./message";
 // grit:schemas

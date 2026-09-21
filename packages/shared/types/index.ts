@@ -48,4 +48,7 @@ export type { Notification } from "./notification";
 export type { SSOConnection } from "./sso-connection";
 export type { Ticket } from "./ticket";
 export type { TicketReply } from "./ticket-reply";
+export type { Conversation } from "./conversation";
+export type { Participant } from "./participant";
+export type { Message } from "./message";
 // grit:types

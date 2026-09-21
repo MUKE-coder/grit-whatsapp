@@ -60,6 +60,15 @@ func ComputeResourceStats(db *gorm.DB, resourceName string, filter ResourceStats
 		return reflectiveResourceStats(db, resourceName, &models.User{}, filter)
 	case "blogs":
 		return reflectiveResourceStats(db, resourceName, &models.Blog{}, filter)
+	case "conversations":
+		return reflectiveResourceStats(db, resourceName, &models.Conversation{}, filter)
+
+	case "participants":
+		return reflectiveResourceStats(db, resourceName, &models.Participant{}, filter)
+
+	case "messages":
+		return reflectiveResourceStats(db, resourceName, &models.Message{}, filter)
+
 	// grit:resource-stats:dispatch
 	default:
 		return nil, fmt.Errorf("dashboard stats not registered for %q", resourceName)
