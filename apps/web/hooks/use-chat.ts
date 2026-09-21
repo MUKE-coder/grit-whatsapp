@@ -282,10 +282,9 @@ export function useChatSync(me: Me | undefined, activeId: string | null) {
         unread: mine || open ? c.unread : c.unread + 1,
       }));
       if (!known || payload.kind !== "text") qc.invalidateQueries({ queryKey: chatKeys.conversations });
-      if (!mine) {
-        const mark = open ? markRead : markDelivered;
-        mark(payload.conversation_id).catch(() => undefined);
-      }
+      // An open chat is marked read by its pane (useMarkReadWhileOpen);
+      // anything else has only reached this device.
+      if (!mine && !open) markDelivered(payload.conversation_id).catch(() => undefined);
     },
     "chat.receipt": (payload: Receipt) => {
       patchInbox(qc, payload.conversation_id, (c) => ({

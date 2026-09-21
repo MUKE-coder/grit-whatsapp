@@ -1,7 +1,7 @@
 {
   "format": 1,
   "grit": "3.298.0",
-  "updatedAt": "2026-09-21T18:03:13Z",
+  "updatedAt": "2026-09-21T18:09:50Z",
   "files": {
     ".claude/skills/grit/SKILL.md": {
       "generator": "scaffold",
@@ -3460,8 +3460,8 @@
     },
     "apps/expo/app/conversations/index.tsx": {
       "generator": "resource:Conversation",
-      "grit": "3.296.0",
-      "hash": "sha256:63faa4665072f780f52331768c635321e90c4b38beddae0d04c07160874b7e94"
+      "grit": "3.298.0",
+      "hash": "sha256:9fc8c141c97d2fb3aaa244a5faae91913103d4605bb19102403f43a4f460ae82"
     },
     "apps/expo/app/conversations/new.tsx": {
       "generator": "resource:Conversation",
@@ -3511,7 +3511,7 @@
     "apps/expo/app/messages/index.tsx": {
       "generator": "resource:Message",
       "grit": "3.298.0",
-      "hash": "sha256:2f267a38d1d985a11a26d0f1e6a65b4e7beb948a0e0cd57b0652320bacfb6233"
+      "hash": "sha256:745995e6529fb68d2560653576bd7206306b59f45a8f5abd6f537bd88255254e"
     },
     "apps/expo/app/messages/new.tsx": {
       "generator": "resource:Message",
@@ -3531,7 +3531,7 @@
     "apps/expo/app/participants/index.tsx": {
       "generator": "resource:Participant",
       "grit": "3.298.0",
-      "hash": "sha256:eb5b77e6acb701d651a90cf985fcccfab39092ba9477e2877c80b288efb69f53"
+      "hash": "sha256:1685a8c60df7c4e6fbafffc0b031b06f17a54083ca33d11050a538580cc61800"
     },
     "apps/expo/app/participants/new.tsx": {
       "generator": "resource:Participant",
@@ -3546,7 +3546,7 @@
     "apps/expo/app/roles/index.tsx": {
       "generator": "scaffold",
       "grit": "3.298.0",
-      "hash": "sha256:3bb8cbb2cd82c77cf71bd24bff86265a0b65c4ca7b38535ef4e2a2fb97465531"
+      "hash": "sha256:3a84d7d1780d285b0a3caf30492cff140346259fdeb901b499393ac1908237c5"
     },
     "apps/expo/app/two-factor.tsx": {
       "generator": "scaffold",

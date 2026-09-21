@@ -43,7 +43,7 @@ export default function ConversationsScreen() {
 
   const renderItem = ({ item }: { item: Conversation }) => (
     <Pressable
-      onPress={() => router.push("/conversations/" + item.id)}
+      onPress={() => router.push(`/conversations/${item.id}`)}
       className="flex-row items-center border-b border-[#E5E7EB] dark:border-[#1f1f2b] bg-white dark:bg-[#111118]"
       style={{ width: TABLE_WIDTH }}
     >

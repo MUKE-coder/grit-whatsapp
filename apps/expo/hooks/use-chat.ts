@@ -194,7 +194,9 @@ export function useChatSync(meId: string | undefined) {
         unread: mine || open ? c.unread : c.unread + 1,
       }));
       if (!known || payload.kind !== "text") qc.invalidateQueries({ queryKey: chatKeys.conversations });
-      if (!mine) (open ? chatApi.read : chatApi.delivered)(payload.conversation_id).catch(() => undefined);
+      // An open chat is marked read by its screen (useMarkReadWhileOpen);
+      // anything else has only reached this device.
+      if (!mine && !open) chatApi.delivered(payload.conversation_id).catch(() => undefined);
     },
     "chat.receipt": (payload: Receipt) => {
       patchInbox(qc, payload.conversation_id, (c) => ({

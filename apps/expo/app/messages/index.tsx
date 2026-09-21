@@ -53,7 +53,7 @@ export default function MessagesScreen() {
 
   const renderItem = ({ item }: { item: Message }) => (
     <Pressable
-      onPress={() => router.push("/messages/" + item.id)}
+      onPress={() => router.push(`/messages/${item.id}`)}
       className="flex-row items-center border-b border-[#E5E7EB] dark:border-[#1f1f2b] bg-white dark:bg-[#111118]"
       style={{ width: TABLE_WIDTH }}
     >
