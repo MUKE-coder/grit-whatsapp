@@ -8,6 +8,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import { queryClient } from "@/lib/query-client";
 import { ImportProgressBanner } from "@/components/ui/import-progress-banner";
+import { ChatSync } from "@/components/chat/chat-sync";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -48,6 +49,7 @@ function RootNav() {
       </Stack>
       {/* grit:mobile-banner — persistent background-import progress */}
       {isAuthenticated ? <ImportProgressBanner /> : null}
+      {isAuthenticated ? <ChatSync /> : null}
     </>
   );
 }

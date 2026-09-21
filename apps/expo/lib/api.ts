@@ -103,6 +103,35 @@ class ApiClient {
     await SecureStore.deleteItemAsync("refresh_token");
   }
 
+  private refreshing: Promise<string | null> | null = null;
+
+  /**
+   * Trades the refresh token for a new pair, once however many requests are
+   * waiting on it. Resolves to the new access token, or null when there is no
+   * refresh token; throws "Session expired" when the server refuses it.
+   */
+  private refreshAccessToken(): Promise<string | null> {
+    this.refreshing ??= (async () => {
+      const refreshToken = await this.getRefreshToken();
+      if (!refreshToken) return null;
+      const refreshRes = await fetchWithTimeout(`${API_URL}/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!refreshRes.ok) {
+        await this.clearTokens();
+        throw new Error("Session expired");
+      }
+      const data = await refreshRes.json();
+      await this.setTokens(data.data.tokens.access_token, data.data.tokens.refresh_token);
+      return data.data.tokens.access_token as string;
+    })().finally(() => {
+      this.refreshing = null;
+    });
+    return this.refreshing;
+  }
+
   private async request(endpoint: string, options: RequestOptions = {}) {
     const token = await this.getToken();
     const headers: Record<string, string> = {
@@ -134,30 +163,18 @@ class ApiClient {
       endpoint.includes("/auth/register") ||
       endpoint.includes("/auth/refresh");
 
-    // Try refresh if unauthorized
+    // Refresh once and retry. Requests that fail together share one refresh:
+    // the server treats a refresh token used twice as stolen and ends the
+    // session, so a refresh per request signed the user out.
     if (res.status === 401 && !isAuthEndpoint) {
-      const refreshToken = await this.getRefreshToken();
-      if (refreshToken) {
-        const refreshRes = await fetchWithTimeout(`${API_URL}/auth/refresh`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ refresh_token: refreshToken }),
+      const fresh = await this.refreshAccessToken();
+      if (fresh) {
+        headers["Authorization"] = `Bearer ${fresh}`;
+        res = await fetchWithTimeout(`${API_URL}${endpoint}`, {
+          method: options.method || "GET",
+          headers,
+          body: options.body ? JSON.stringify(options.body) : undefined,
         });
-
-        if (refreshRes.ok) {
-          const data = await refreshRes.json();
-          await this.setTokens(data.data.tokens.access_token, data.data.tokens.refresh_token);
-
-          headers["Authorization"] = `Bearer ${data.data.tokens.access_token}`;
-          res = await fetchWithTimeout(`${API_URL}${endpoint}`, {
-            method: options.method || "GET",
-            headers,
-            body: options.body ? JSON.stringify(options.body) : undefined,
-          });
-        } else {
-          await this.clearTokens();
-          throw new Error("Session expired");
-        }
       }
     }
 

@@ -1,3 +1,5 @@
+import * as SecureStore from "@/lib/secure-store";
+
 /**
  * The realtime connection: one socket per app, shared by every subscriber.
  *
@@ -19,7 +21,9 @@ export type Status = "connecting" | "open" | "closed";
 const WS_URL = (process.env.EXPO_PUBLIC_API_URL || "http://localhost:8080")
   .replace(/^http/, "ws") + "/api/ws";
 
-let tokenGetter: () => string | null | Promise<string | null> = () => null;
+// The access token the API client keeps in SecureStore (lib/api.ts), read on
+// every connect so a refreshed token is used, not the one from sign-in.
+let tokenGetter: () => string | null | Promise<string | null> = () => SecureStore.getItemAsync("access_token");
 
 /**
  * Tell the realtime client how to find the current access token.
