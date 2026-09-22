@@ -3,6 +3,7 @@ package services
 import (
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -483,7 +484,9 @@ func (s *ChatService) Send(conversationID, senderID string, in SendInput) (Messa
 	view := toMessageView(msg, in.ClientID)
 	members, err := s.memberIDs(conversationID)
 	if err != nil {
-		return view, nil // saved; the others will see it on their next fetch
+		// Saved: the others see it on their next fetch, so the send succeeded.
+		log.Printf("chat: announcing a message in %s: %v", conversationID, err)
+		return view, nil
 	}
 	s.Hub.SendToUsers(members, realtime.Event{Type: EventMessage, Payload: view})
 

@@ -67,9 +67,9 @@ function ParticipantsPage() {
             if (await confirm({ title: "Delete participant", message: "This will delete this participant. This action cannot be undone.", danger: true, confirmLabel: "Delete" })) del.mutate(String(row.id));
           }}
           onBulkDelete={async (rows) => {
-            if (await confirm({ title: "Delete participants", message: "Delete " + rows.length + " participant(s)? This cannot be undone.", danger: true, confirmLabel: "Delete" })) rows.forEach((r) => del.mutate(String(r.id)));
+            if (await confirm({ title: "Delete participants", message: "Delete " + rows.length + " participant(s)? This cannot be undone.", danger: true, confirmLabel: "Delete" })) rows.forEach((r) => { del.mutate(String(r.id)); });
           }}
-          onImport={(records) => records.forEach((rec) => create.mutate(rec))}
+          onImport={(records) => records.forEach((rec) => { create.mutate(rec); })}
         />
       </div>
 

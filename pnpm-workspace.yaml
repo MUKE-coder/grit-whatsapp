@@ -9,3 +9,14 @@ allowBuilds:
 # pnpm 10 spelling of the same setting.
 onlyBuiltDependencies:
   - esbuild
+
+# Expo's bundler: see pnpmExpoAudit in Grit's scaffold for the reasoning.
+overrides:
+  "@expo/metro-config>postcss": "^8.5.28"
+
+auditConfig:
+  ignoreGhsas:
+    # image-size 1.x in metro: denial of service parsing ICNS, JXL and HEIF.
+    # Only the project's own image assets are read, at bundle time.
+    - GHSA-w3rx-r6r6-pgpr
+    - GHSA-5p2g-fcmc-qvqq

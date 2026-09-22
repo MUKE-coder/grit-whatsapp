@@ -61,9 +61,9 @@ function ConversationsPage() {
             if (await confirm({ title: "Delete conversation", message: "This will delete this conversation. This action cannot be undone.", danger: true, confirmLabel: "Delete" })) del.mutate(String(row.id));
           }}
           onBulkDelete={async (rows) => {
-            if (await confirm({ title: "Delete conversations", message: "Delete " + rows.length + " conversation(s)? This cannot be undone.", danger: true, confirmLabel: "Delete" })) rows.forEach((r) => del.mutate(String(r.id)));
+            if (await confirm({ title: "Delete conversations", message: "Delete " + rows.length + " conversation(s)? This cannot be undone.", danger: true, confirmLabel: "Delete" })) rows.forEach((r) => { del.mutate(String(r.id)); });
           }}
-          onImport={(records) => records.forEach((rec) => create.mutate(rec))}
+          onImport={(records) => records.forEach((rec) => { create.mutate(rec); })}
         />
       </div>
 
