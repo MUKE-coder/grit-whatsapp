@@ -1,8 +1,12 @@
 # WhatsApp, built with Grit
 
+![WhatsApp, built with Grit](docs/assets/cover.webp)
+
 A working WhatsApp-style messenger on the web, a phone and the desktop, sharing one Go API: direct and
 group chats, live messages, typing indicators, online status, read receipts, unread counts, mute, photos
 and push notifications. The first [Grit UI](https://gritframework.dev) blueprint.
+
+![The inbox, a chat with a photo and read ticks, and a group, in the Expo app](docs/assets/screens.webp)
 
 - **[BLUEPRINT.md](BLUEPRINT.md)**: how to run it, how it works, and how it differs from WhatsApp at scale.
 - **[BUILD-ALONG.md](BUILD-ALONG.md)**: the build step by step, from `grit new` to three clients.
