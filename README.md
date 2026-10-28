@@ -26,6 +26,21 @@ grit start
 
 Open http://localhost:3000/register in two browsers, create two accounts, and start a chat.
 
+## Building on this with an AI assistant
+
+The Grit expert skills know this framework: one router that reads the project
+and assigns the work, and specialists for resources, the admin panel, data,
+design, security, performance and review. They read the docs out of your
+installed `grit` binary rather than from memory, so they stay current with it.
+
+```bash
+grit skills install --all          # every project on this machine
+grit skills install --project      # this repository only
+```
+
+Then start a new session and run `/grit-build`. Skills load at startup, so an
+assistant that is already open will not see them until it is restarted.
+
 ---
 
 The rest of this file is the standard README of a Grit project.

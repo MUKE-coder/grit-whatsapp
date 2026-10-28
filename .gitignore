@@ -72,3 +72,12 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 .expo/
+
+# The Grit expert skills, installed per project by `grit skills install
+# --project`. NOT committed: the installer writes the real files to
+# .agents/skills and symlinks .claude/skills at them with an absolute path,
+# which would point at one machine for everybody who clones this. Run the
+# command yourself instead; README.md says how, and it is one line.
+.agents/
+.claude/skills/grit-*
+skills-lock.json
