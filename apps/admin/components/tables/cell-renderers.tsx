@@ -177,16 +177,22 @@ function BadgeCell({
   );
 }
 
+// Yes and No, because this renders every boolean column there is.
+//
+// It used to say Active and Inactive, which reads correctly for a column
+// called "active" and wrongly for all the others: a contact's "starred"
+// column said Inactive, an order's "paid" column said Active. A column whose
+// own header already names the thing only needs the answer.
 function BooleanCell({ value }: { value: boolean }) {
   return value ? (
     <span className="inline-flex items-center gap-1 text-success">
       <Check className="h-3.5 w-3.5" />
-      <span className="text-xs">Active</span>
+      <span className="text-xs">Yes</span>
     </span>
   ) : (
     <span className="inline-flex items-center gap-1 text-text-muted">
       <X className="h-3.5 w-3.5" />
-      <span className="text-xs">Inactive</span>
+      <span className="text-xs">No</span>
     </span>
   );
 }
@@ -371,6 +377,23 @@ function EmailCell({ value }: { value: string }) {
     >
       {value}
     </a>
+  );
+}
+
+/**
+ * Reads a column key that may name a nested property: "board.name".
+ *
+ * A belongs_to column is generated with a dotted key, because the API returns
+ * the related object rather than a flattened field. Every surface that renders
+ * a column has to resolve it the same way; the list table did and the record
+ * page did not, so a detail page showed a dash for every relation while the
+ * list beside it showed the name.
+ */
+export function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
+  if (!path.includes(".")) return obj[path];
+  return path.split(".").reduce<unknown>(
+    (acc, key) => acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
+    obj
   );
 }
 

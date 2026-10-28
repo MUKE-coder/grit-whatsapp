@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,17 +61,63 @@ func (b *SecObsBridge) PulseGet(ctx context.Context, path string, out interface{
 	return b.do(ctx, "pulse", path, out)
 }
 
+// SentinelPost sends JSON to a Sentinel endpoint: banning an address, lifting
+// a ban, sweeping repeat offenders. body may be nil.
+func (b *SecObsBridge) SentinelPost(ctx context.Context, path string, body, out interface{}) error {
+	return b.send(ctx, "sentinel", http.MethodPost, path, body, out)
+}
+
+// SentinelDelete removes something from Sentinel, such as a ban.
+func (b *SecObsBridge) SentinelDelete(ctx context.Context, path string, out interface{}) error {
+	return b.send(ctx, "sentinel", http.MethodDelete, path, nil, out)
+}
+
 func (b *SecObsBridge) do(ctx context.Context, kind, path string, out interface{}) error {
+	return b.send(ctx, kind, http.MethodGet, path, nil, out)
+}
+
+// send is the one request. It was a GET and nothing else, which was fine while
+// these dashboards only read; banning an address is a write, and a second
+// copy of the token handling is how the retry stops matching the first call.
+func (b *SecObsBridge) send(ctx context.Context, kind, method, path string, body, out interface{}) error {
+	// Encoded once, because a retry needs to send the same bytes and a
+	// consumed reader sends none.
+	var payload []byte
+	if body != nil {
+		var err error
+		payload, err = json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("%w: %s %s: encoding body: %v", ErrUpstream, kind, path, err)
+		}
+	}
+	build := func(tok string) (*http.Request, error) {
+		var reader io.Reader
+		if payload != nil {
+			reader = bytes.NewReader(payload)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, b.baseURL()+path, reader)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		return req, nil
+	}
+
 	tok, err := b.token(ctx, kind)
 	if err != nil {
 		return fmt.Errorf("%w: %s auth: %v", ErrUpstream, kind, err)
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, b.baseURL()+path, nil)
-	req.Header.Set("Authorization", "Bearer "+tok)
+	req, err := build(tok)
+	if err != nil {
+		return fmt.Errorf("%w: %s %s %s: %v", ErrUpstream, kind, method, path, err)
+	}
 
 	res, err := b.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("%w: %s GET %s: %v", ErrUpstream, kind, path, err)
+		return fmt.Errorf("%w: %s %s %s: %v", ErrUpstream, kind, method, path, err)
 	}
 	defer res.Body.Close()
 
@@ -81,8 +128,10 @@ func (b *SecObsBridge) do(ctx context.Context, kind, path string, out interface{
 		if err != nil {
 			return fmt.Errorf("%w: %s re-auth: %v", ErrUpstream, kind, err)
 		}
-		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, b.baseURL()+path, nil)
-		req2.Header.Set("Authorization", "Bearer "+tok2)
+		req2, err := build(tok2)
+		if err != nil {
+			return fmt.Errorf("%w: %s retry: %v", ErrUpstream, kind, err)
+		}
 		res, err = b.httpClient.Do(req2)
 		if err != nil {
 			return fmt.Errorf("%w: %s retry: %v", ErrUpstream, kind, err)

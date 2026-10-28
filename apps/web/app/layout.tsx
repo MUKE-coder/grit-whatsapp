@@ -7,8 +7,16 @@ import { Providers } from "@/components/providers";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "whatsapp — Go + React. Built with Grit.",
-  description: "A full-stack framework that combines Go backend with Next.js frontend. Build fast, ship faster.",
+  title: "WhatsApp",
+  // Yours to write. This is the sentence a search result and a link preview
+  // show under the name, and it shipped for a long time as Grit's description
+  // of itself, which described the framework on somebody else's product.
+  description: "Direct and group chats with live delivery, read receipts and photos, on the web, a phone and the desktop.",
+  // <meta name="generator" content="Grit">, the convention every static site
+  // generator and CMS uses and the one technology scanners read. No version:
+  // knowing an app is a Grit app is fine, and knowing which release it is
+  // running is a list of that release's advisories. Delete the line to opt out.
+  generator: "Grit",
 };
 
 export default function RootLayout({

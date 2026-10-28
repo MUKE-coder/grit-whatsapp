@@ -70,6 +70,9 @@ interface ResourceQueryParams {
   // Extra totals to return beside the page, such as created_7d: the default
   // stat cards read theirs from the list response instead of a request each.
   counts?: string[];
+  // Columns to count by value, such as status: one GROUP BY each, answered
+  // beside the page for the same reason the counts are.
+  breakdown?: string[];
 }
 
 interface PaginatedResponse<T = Record<string, unknown>> {
@@ -81,6 +84,9 @@ interface PaginatedResponse<T = Record<string, unknown>> {
     pages: number;
     // Answers ?counts=. Absent when the API does not support it.
     counts?: Record<string, number> | null;
+    // Answers ?breakdown=: per column, the values and how many rows hold each,
+    // largest first. An empty value means the column is null or blank.
+    breakdown?: Record<string, { value: string; count: number }[]> | null;
   };
 }
 
@@ -88,12 +94,12 @@ export function useResource<T = Record<string, unknown>>(
   endpoint: string,
   params: ResourceQueryParams = {}
 ) {
-  const { page = 1, pageSize = 20, search, sortBy, sortOrder, filters, dateParams, dateField, counts } = params;
+  const { page = 1, pageSize = 20, search, sortBy, sortOrder, filters, dateParams, dateField, counts, breakdown } = params;
 
   return useQuery<PaginatedResponse<T>>({
     // v3.31.34: dateParams + dateField included in key so a date
     // filter change invalidates the cache and the list refetches.
-    queryKey: resourceKeys.list(endpoint, { page, pageSize, search, sortBy, sortOrder, filters, dateParams, dateField, counts }),
+    queryKey: resourceKeys.list(endpoint, { page, pageSize, search, sortBy, sortOrder, filters, dateParams, dateField, counts, breakdown }),
     // The signal cancels a request the next keystroke or page has replaced, so
     // a slow answer to an old search cannot land on top of a newer one.
     queryFn: async ({ signal }) => {
@@ -122,6 +128,9 @@ export function useResource<T = Record<string, unknown>>(
       }
       if (counts && counts.length > 0) {
         searchParams.set("counts", counts.join(","));
+      }
+      if (breakdown && breakdown.length > 0) {
+        searchParams.set("breakdown", breakdown.join(","));
       }
 
       const { data } = await apiClient.get(`${endpoint}?${searchParams}`, { signal });

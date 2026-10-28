@@ -1,6 +1,7 @@
 package services_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -154,4 +155,68 @@ func TestCannotDecideOnCompletedReview(t *testing.T) {
 
 	_, err = services.DecideAccessReviewItem(db, nil, review.ID, review.Items[0].ID, "revoked", "", "admin-1", "admin@x.dev")
 	assert.ErrorIs(t, err, services.ErrReviewClosed)
+}
+
+// The list view's counts come from one grouped query rather than four per
+// campaign, and they have to add up to the same answers.
+//
+// The handler ran 4n counts and discarded every error, so a count that failed
+// drew a campaign as having nothing left to certify, which in an access review is
+// the one wrong answer that matters.
+func TestAccessReviewSummariesCountsEveryDecision(t *testing.T) {
+	db := newReviewDB(t)
+	ctx := context.Background()
+	seedGrant(t, db, "a@example.com", "EDITOR")
+	seedGrant(t, db, "b@example.com", "VIEWER")
+
+	first, err := services.OpenAccessReview(db, "Q1", "", "admin", "admin@example.com")
+	require.NoError(t, err)
+	second, err := services.OpenAccessReview(db, "Q2", "", "admin", "admin@example.com")
+	require.NoError(t, err)
+
+	// Decide one item in the first campaign, leaving the other pending.
+	var items []models.AccessReviewItem
+	require.NoError(t, db.Where("review_id = ?", first.ID).Order("user_email asc").Find(&items).Error)
+	require.Len(t, items, 2)
+	require.NoError(t, db.Model(&items[0]).Update("decision", "approved").Error)
+
+	out, err := services.AccessReviewSummaries(ctx, db)
+	require.NoError(t, err)
+	require.Len(t, out, 2)
+
+	byID := map[string]services.AccessReviewSummary{}
+	for _, s := range out {
+		byID[s.ID] = s
+	}
+	one := byID[first.ID]
+	assert.Equal(t, int64(2), one.TotalItems)
+	assert.Equal(t, int64(1), one.ApprovedItems)
+	assert.Equal(t, int64(1), one.PendingItems)
+	assert.Equal(t, int64(0), one.RevokedItems)
+
+	two := byID[second.ID]
+	assert.Equal(t, int64(2), two.TotalItems, "a second campaign's items were counted against the first")
+	assert.Equal(t, int64(2), two.PendingItems)
+
+	// Newest first, which is the order the screen shows them in.
+	assert.Equal(t, second.ID, out[0].ID)
+}
+
+// The detail view reads the items in the order a reviewer works through them: by
+// person, then by role.
+func TestAccessReviewWithItemsIsOrderedForTheReviewer(t *testing.T) {
+	db := newReviewDB(t)
+	ctx := context.Background()
+	seedGrant(t, db, "zoe@example.com", "VIEWER")
+	seedGrant(t, db, "alice@example.com", "EDITOR")
+	review, err := services.OpenAccessReview(db, "Q3", "", "admin", "admin@example.com")
+	require.NoError(t, err)
+
+	loaded, err := services.AccessReviewWithItems(ctx, db, review.ID)
+	require.NoError(t, err)
+	require.Len(t, loaded.Items, 2)
+	assert.Equal(t, "alice@example.com", loaded.Items[0].UserEmail)
+
+	_, err = services.AccessReviewWithItems(ctx, db, "no-such-review")
+	assert.Error(t, err)
 }

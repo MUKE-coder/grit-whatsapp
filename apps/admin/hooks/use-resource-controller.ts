@@ -3,9 +3,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
+import { detailHref } from "@/lib/detail-href";
 import type {
   BulkAction,
   ColumnDefinition,
+  CountByConfig,
   CustomBulkAction,
   ResourceDefinition,
   TableAction,
@@ -21,6 +23,45 @@ import type { DateRange } from "@/components/tables/date-filter";
 // The windows the default stat cards show beside the total. The list request
 // asks for them (?counts=), so the cards cost no requests of their own.
 const DEFAULT_STAT_COUNTS = ["created_7d", "created_30d", "updated_7d"];
+
+/*
+ * What to call the card for one value of a counted column.
+ *
+ * The labels map comes first, and carries both spellings of a boolean because
+ * the databases disagree: Postgres returns "true", SQLite and MySQL return
+ * "1", and the same admin has to read all three. An empty value is a row where
+ * nobody filled the column in, which reads better as "None" than as a blank
+ * card with a number under it.
+ */
+/*
+ * A boolean has two spellings and the database picks one.
+ *
+ * Postgres answers a counted boolean as "true" and "false"; SQLite and MySQL
+ * answer "1" and "0". The resource definition names one pair, and the same
+ * definition has to work on all three, so a lookup that misses tries the other
+ * spelling before giving up. Without this, every Active/Inactive card read 0 on
+ * SQLite while the role cards beside it were right.
+ */
+const BOOLEAN_SPELLINGS: Record<string, string> = {
+  true: "1",
+  "1": "true",
+  false: "0",
+  "0": "false",
+};
+
+function countFor(found: Map<string, number>, value: string): number {
+  const direct = found.get(value);
+  if (direct !== undefined) return direct;
+  const other = BOOLEAN_SPELLINGS[value];
+  return (other === undefined ? undefined : found.get(other)) ?? 0;
+}
+
+function cardLabel(column: CountByConfig, value: string): string {
+  const named = column.labels?.[value];
+  if (named) return named;
+  const shown = value === "" ? "None" : value;
+  return column.label ? column.label + ": " + shown : shown;
+}
 
 export interface ResourceControllerOptions {
   /** Start on a page other than 1. */
@@ -50,6 +91,10 @@ export interface ResourceController<T = Record<string, unknown>> {
   sortBy: string;
   sortOrder: "asc" | "desc";
   filters: Record<string, string>;
+  /** Exactly what the list request sent: the tab, the filters and archived. */
+  queryFilters: Record<string, string>;
+  /** The date window as query params, for anything asking the same question. */
+  dateParams: Record<string, string>;
   dateRange: DateRange;
   setPage: (page: number) => void;
   setPageSize: (size: number) => void;
@@ -142,6 +187,8 @@ export interface ResourceController<T = Record<string, unknown>> {
     cancel: () => void;
   };
   importer: { open: boolean; setOpen: (open: boolean) => void };
+  /** The bulk-create grid: many rows at once, in a spreadsheet. */
+  bulkCreator: { open: boolean; setOpen: (open: boolean) => void };
 
   // ── odds and ends the default page needs ────────────────────────────
   /** Same query the table ran, for an export that matches what is on screen. */
@@ -188,23 +235,44 @@ export function useResourceController<T = Record<string, unknown>>(
     Array.isArray(statsConfig.cards) &&
     statsConfig.cards.length > 0;
 
+  // The columns to count by value. Capped at three because each is a GROUP BY
+  // on the list's query, and the API drops any beyond that anyway.
+  const countBy = useMemo(
+    () =>
+      statsEnabled && typeof statsConfig === "object" && statsConfig !== null && Array.isArray(statsConfig.countBy)
+        ? statsConfig.countBy.slice(0, 3)
+        : [],
+    [statsEnabled, statsConfig],
+  );
+  const countByFields = useMemo(() => countBy.map((c) => c.field), [countBy]);
+
+  // Tab filters, then the operator's own, then the archived flag. The
+  // operator's win: picking "Unpaid" and then filtering by customer should
+  // narrow the tab, not silently leave it.
+  //
+  // Computed here rather than inline in the request because the insights panel
+  // sends it too, and a panel charting a different set of rows than the table
+  // is showing would be two authoritative numbers that disagree.
+  const queryFilters = useMemo(
+    () => ({
+      ...(url.tabs.find((t) => t.key === url.activeTab)?.filters ?? {}),
+      ...url.filters,
+      ...(url.showArchived ? { archived: "true" } : {}),
+    }),
+    [url.tabs, url.activeTab, url.filters, url.showArchived],
+  );
+
   const { data, isLoading, isFetching } = useResource<T>(resource.endpoint, {
     page: url.page,
     pageSize: url.pageSize,
     search: url.debouncedSearch,
     sortBy: url.sortBy,
     sortOrder: url.sortOrder,
-    // Tab filters, then the operator's own, then the archived flag. The
-    // operator's win: picking "Unpaid" and then filtering by customer should
-    // narrow the tab, not silently leave it.
-    filters: {
-      ...(url.tabs.find((t) => t.key === url.activeTab)?.filters ?? {}),
-      ...url.filters,
-      ...(url.showArchived ? { archived: "true" } : {}),
-    },
+    filters: queryFilters,
     dateParams: url.dateParams,
     dateField: resource.table.dateFilter?.field,
     counts: statsEnabled && !customStatCards ? DEFAULT_STAT_COUNTS : undefined,
+    breakdown: countByFields.length > 0 ? countByFields : undefined,
   });
 
   const rows = useMemo(() => data?.data ?? [], [data]);
@@ -250,7 +318,7 @@ export function useResourceController<T = Record<string, unknown>>(
   const view = useCallback(
     (row: T) => {
       const id = String((row as Record<string, unknown>).id);
-      router.push("/resources/" + resource.slug + "/" + id);
+      router.push(detailHref("/resources/" + resource.slug, id));
     },
     [router, resource.slug],
   );
@@ -470,8 +538,34 @@ export function useResourceController<T = Record<string, unknown>>(
       { label: "This Month", value: count("created_30d"), loading, icon: "Calendar", color: "info" },
       { label: "Updated Recently", value: count("updated_7d"), loading, icon: "RefreshCw" },
     ];
+
+    // Then one card per value of each counted column, from the same response.
+    //
+    // A value with no rows still gets a card when the resource named it in
+    // "only": "Inactive 0" is an answer, and a card that disappears when it
+    // reaches nought is a row of cards that reflows as the data changes.
+    const breakdown = data?.meta?.breakdown;
+    for (const column of countBy) {
+      const slices = breakdown?.[column.field];
+      if (!slices && !column.only) continue;
+      const found = new Map((slices ?? []).map((slice) => [slice.value, slice.count]));
+      const values = column.only ?? (slices ?? []).map((slice) => slice.value);
+      for (const value of values) {
+        defaults.push({
+          label: cardLabel(column, value),
+          value: slices ? countFor(found, value) : "—",
+          loading,
+          icon: column.icon,
+          color: column.color,
+          // What this card counted, so clicking it can narrow the table to
+          // exactly those rows. The four generic cards above have no subset
+          // and get none, which is what keeps them from looking clickable.
+          filter: { field: column.field, value },
+        });
+      }
+    }
     return defaults;
-  }, [statsEnabled, customStatCards, statsConfig, resource.icon, dateParams, showArchived, data, isLoading]);
+  }, [statsEnabled, customStatCards, statsConfig, resource.icon, dateParams, showArchived, data, isLoading, countBy]);
 
   return {
     resource,
@@ -489,6 +583,8 @@ export function useResourceController<T = Record<string, unknown>>(
     sortBy: url.sortBy,
     sortOrder: url.sortOrder,
     filters: url.filters,
+    queryFilters,
+    dateParams: url.dateParams,
     dateRange: url.dateRange,
     setPage: url.setPage,
     setPageSize: url.setPageSize,
@@ -572,6 +668,7 @@ export function useResourceController<T = Record<string, unknown>>(
       cancel: () => setPendingCustom(null),
     },
     importer: { open: dialogs.importOpen, setOpen: dialogs.setImportOpen },
+    bulkCreator: { open: dialogs.bulkCreateOpen, setOpen: dialogs.setBulkCreateOpen },
 
     apiSearchParams: url.apiSearchParams,
     stats,

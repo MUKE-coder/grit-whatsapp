@@ -7,11 +7,12 @@ import { useRouter } from "next/navigation";
 import type { ResourceDefinition, ColumnDefinition, FieldDefinition } from "@/lib/resource";
 import { useResource } from "@/hooks/use-resource";
 import { useResourceDetailController } from "@/hooks/use-resource-detail-controller";
-import { renderCell } from "@/components/tables/cell-renderers";
+import { renderCell, getNestedValue } from "@/components/tables/cell-renderers";
 import { DataTable } from "@/components/tables/data-table";
 import { ConfirmModal } from "@/components/ui/confirm-modal";
 import { ArrowLeft, Pencil, Trash2, Loader2, Printer, Plus, FileText } from "@/lib/icons";
 import { useLocalizedResource } from "@/lib/i18n";
+import { detailHref } from "@/lib/detail-href";
 import { buttonClasses } from "@/components/ui/button";
 
 // The form stack loads when a record is edited or a related one created, the way
@@ -159,7 +160,7 @@ function ResourceDetailView({ resource, id }: ResourceDetailPageProps) {
             <div key={col.key} className="min-w-0">
               <dt className="text-xs font-medium uppercase tracking-wide text-text-muted">{col.label}</dt>
               <dd className="mt-1 break-words text-sm text-foreground">
-                {renderCell(col, record[col.key], record)}
+                {renderCell(col, getNestedValue(record, col.key), record)}
               </dd>
             </div>
           ))}
@@ -272,7 +273,7 @@ function RelatedTable({
           columns={columns}
           data={rows}
           isLoading={isLoading}
-          onView={slug ? (item) => router.push("/resources/" + slug + "/" + String(item.id)) : undefined}
+          onView={slug ? (item) => router.push(detailHref("/resources/" + slug, String(item.id))) : undefined}
         />
       </div>
       {creating && createResource && (

@@ -9,6 +9,7 @@ import (
 	"time"
 	"whatsapp/apps/api/internal/mail"
 	"whatsapp/apps/api/internal/models"
+	"whatsapp/apps/api/internal/password"
 	"whatsapp/apps/api/internal/respond"
 	"whatsapp/apps/api/internal/services"
 
@@ -33,8 +34,8 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	// into an oracle for which email addresses hold accounts.
 	const genericResponse = "If an account with that email exists, a password reset link has been sent"
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("email = ?", req.Email).First(&user).Error; err != nil {
+	user, err := h.AuthService.UserByEmail(c.Request.Context(), req.Email)
+	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": genericResponse})
 		return
 	}
@@ -49,7 +50,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	// handler has returned. detach caps how many of these can be in flight at
 	// once; it used to be one unbounded goroutine per request.
 	clientIP := c.ClientIP()
-	detach(func(ctx context.Context) { h.deliverPasswordReset(ctx, user, clientIP) })
+	detach(func(ctx context.Context) { h.deliverPasswordReset(ctx, *user, clientIP) })
 
 	c.JSON(http.StatusOK, gin.H{"message": genericResponse})
 }
@@ -125,14 +126,35 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 		return
 	}
 
+	// The same rules as registering and changing. A reset is where a weak
+	// password most often gets in: the person is locked out, in a hurry, and
+	// picks something they will remember.
+	if owner, err := h.AuthService.UserByID(c.Request.Context(), userID); err == nil {
+		if failed := password.Check(req.Password, owner.Email, owner.FirstName, owner.LastName); len(failed) > 0 {
+			respond.Fail(c, respond.CodeValidationError, password.Message(failed))
+			return
+		}
+	} else if failed := password.Check(req.Password); len(failed) > 0 {
+		respond.Fail(c, respond.CodeValidationError, password.Message(failed))
+		return
+	}
+
+	// The local rules judge shape. This asks whether the exact password is
+	// already on the lists attackers replay, which shape cannot tell you.
+	// Off unless PASSWORD_BREACH_CHECK is set, and it answers false whenever
+	// it cannot reach a definite yes.
+	if password.Breached(c.Request.Context(), req.Password) {
+		respond.Fail(c, respond.CodeValidationError, password.BreachMessage)
+		return
+	}
+
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to hash password")
 		return
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Model(&models.User{}).Where("id = ?", userID).
-		Update("password", string(hashedPassword)).Error; err != nil {
+	if err := h.users().SetPassword(c.Request.Context(), userID, string(hashedPassword)); err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to update password")
 		return
 	}
@@ -142,6 +164,21 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	// exercise, so every device is signed out — including any the attacker holds.
 	if err := services.RevokeAllUserSessions(h.DB, userID, ""); err != nil {
 		log.Printf("password reset: revoking sessions for %s: %v", userID, err)
+	}
+
+	// A reset clears the lockout, and without this it did not.
+	//
+	// The account lockout bars an address after too many wrong passwords, and
+	// it is keyed on the email, which anybody can guess. So anybody could lock
+	// anybody else out, and the victim's obvious move, resetting the password,
+	// left the lock in place: they were refused with the same "invalid email or
+	// password" as before, having just set the password themselves. The only
+	// ways out were waiting or an administrator.
+	//
+	// Proving you can read the mailbox is strictly stronger evidence than
+	// waiting fifteen minutes, so it clears the lock.
+	if _, err := h.users().ClearLockout(c.Request.Context(), userID); err != nil {
+		log.Printf("password reset: clearing the lockout for %s: %v", userID, err)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

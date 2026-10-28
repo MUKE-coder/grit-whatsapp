@@ -5,6 +5,7 @@
       "name": "push",
       "version": "1.0.0",
       "installed_at": "2026-09-21T18:51:23.7377541Z",
+      "updated_at": "2026-10-28T19:43:01.0781783Z",
       "files": [
         "apps/api/internal/handlers/push.go",
         "apps/api/internal/models/push_token.go",
@@ -12,6 +13,13 @@
         "apps/api/internal/services/push_test.go",
         "apps/expo/lib/push.ts"
       ],
+      "file_hashes": {
+        "apps/api/internal/handlers/push.go": "db957ad50b47c9d4fc4362b123377ffcf0d83bef8b4ccdd635b59dc678f7fc2b",
+        "apps/api/internal/models/push_token.go": "adaf514a85ef8658a1fcd7a8e8d4ccdcd49c75f9dd54f1cbc30e8075f4231695",
+        "apps/api/internal/services/push.go": "e3398294a186ff699c701a3e2f4e01becaca8c6c2b4f0519ad9d2535a149f31e",
+        "apps/api/internal/services/push_test.go": "1542c5d419cc0079a47671eb3298ee9f2ffd57e921fb2eebaf59fc8c7751b6cf",
+        "apps/expo/lib/push.ts": "0938ce72bf1fb3affe4bb9cd7dcdcb6f827fbb9018eab7332d1c39a2d1e86015"
+      },
       "injections": [
         {
           "file": "apps/api/internal/models/user.go",

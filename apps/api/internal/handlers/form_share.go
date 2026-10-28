@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -37,6 +36,14 @@ func (h *FormShareHandler) Resources(c *gin.Context) {
 	})
 }
 
+// shares is the service every method below reads and writes through. What a
+// share is, and how a submission is counted, is a decision about data: see
+// internal/services/form_share.go. Who may see one, and whether a password was
+// right, is decided here.
+func (h *FormShareHandler) shares() *services.FormShareService {
+	return &services.FormShareService{DB: h.DB}
+}
+
 // FieldsPreview returns the same field schema PublicGet returns,
 // keyed by resource name rather than by share token. Used by the
 // admin's New Share modal to render a preview before the share
@@ -58,12 +65,8 @@ func (h *FormShareHandler) FieldsPreview(c *gin.Context) {
 
 // List paginates form shares for the admin dashboard.
 func (h *FormShareHandler) List(c *gin.Context) {
-	var shares []models.FormShare
-	q := h.DB.WithContext(c.Request.Context()).Order("created_at DESC")
-	if rn := c.Query("resource_name"); rn != "" {
-		q = q.Where("resource_name = ?", rn)
-	}
-	if err := q.Find(&shares).Error; err != nil {
+	shares, err := h.shares().All(c.Request.Context(), c.Query("resource_name"))
+	if err != nil {
 		respond.ServerError(c, "INTERNAL_ERROR", err, "Internal server error")
 		return
 	}
@@ -126,7 +129,7 @@ func (h *FormShareHandler) Create(c *gin.Context) {
 		share.PasswordHash = string(hash)
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Create(&share).Error; err != nil {
+	if err := h.shares().Create(c.Request.Context(), &share); err != nil {
 		respond.ServerError(c, "INTERNAL_ERROR", err, "Internal server error")
 		return
 	}
@@ -148,9 +151,8 @@ type UpdateFormShareRequest struct {
 // unchanged; pass password="-" to remove an existing password.
 
 func (h *FormShareHandler) Update(c *gin.Context) {
-	id := c.Param("id")
-	var share models.FormShare
-	if err := h.DB.WithContext(c.Request.Context()).First(&share, "id = ?", id).Error; err != nil {
+	share, err := h.shares().ByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "Share not found")
 		return
 	}
@@ -188,7 +190,7 @@ func (h *FormShareHandler) Update(c *gin.Context) {
 	if req.HiddenFields != nil {
 		share.HiddenFields = datatypes.NewJSONSlice(*req.HiddenFields)
 	}
-	if err := h.DB.WithContext(c.Request.Context()).Save(&share).Error; err != nil {
+	if err := h.shares().Save(c.Request.Context(), share); err != nil {
 		respond.ServerError(c, "INTERNAL_ERROR", err, "Internal server error")
 		return
 	}
@@ -198,8 +200,7 @@ func (h *FormShareHandler) Update(c *gin.Context) {
 
 // Delete soft-deletes a share (token stops working).
 func (h *FormShareHandler) Delete(c *gin.Context) {
-	id := c.Param("id")
-	if err := h.DB.WithContext(c.Request.Context()).Delete(&models.FormShare{}, "id = ?", id).Error; err != nil {
+	if err := h.shares().Delete(c.Request.Context(), c.Param("id")); err != nil {
 		respond.ServerError(c, "INTERNAL_ERROR", err, "Internal server error")
 		return
 	}
@@ -220,8 +221,8 @@ func (h *FormShareHandler) Delete(c *gin.Context) {
 // Name + Price + Description + Category, etc.
 func (h *FormShareHandler) PublicGet(c *gin.Context) {
 	token := c.Param("token")
-	var share models.FormShare
-	if err := h.DB.WithContext(c.Request.Context()).First(&share, "token = ? AND enabled = ?", token, true).Error; err != nil {
+	share, err := h.shares().EnabledByToken(c.Request.Context(), token)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "Link not found or disabled")
 		return
 	}
@@ -264,8 +265,8 @@ type PublicFormSubmitRequest struct {
 
 func (h *FormShareHandler) PublicSubmit(c *gin.Context) {
 	token := c.Param("token")
-	var share models.FormShare
-	if err := h.DB.WithContext(c.Request.Context()).First(&share, "token = ? AND enabled = ?", token, true).Error; err != nil {
+	share, err := h.shares().EnabledByToken(c.Request.Context(), token)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "Link not found or disabled")
 		return
 	}
@@ -289,12 +290,10 @@ func (h *FormShareHandler) PublicSubmit(c *gin.Context) {
 		return
 	}
 
-	// Bump submission count (best-effort — failure here doesn't
-	// retroactively invalidate the user's submission).
-	if err := h.DB.WithContext(c.Request.Context()).Model(&share).UpdateColumns(map[string]interface{}{
-		"submission_count": share.SubmissionCount + 1,
-		"updated_at":       time.Now(),
-	}).Error; err != nil {
+	// Best-effort: a count that fails does not retroactively invalidate somebody's
+	// submission. The increment itself is the service's, and is in SQL, because
+	// this one used to lose a submission whenever two arrived together.
+	if err := h.shares().CountSubmission(c.Request.Context(), share); err != nil {
 		log.Printf("form share %s: counting a submission: %v", share.ID, err)
 	}
 
@@ -305,13 +304,13 @@ func (h *FormShareHandler) PublicSubmit(c *gin.Context) {
 	if len(ua) > maxSubmissionUserAgent {
 		ua = ua[:maxSubmissionUserAgent]
 	}
-	if err := h.DB.WithContext(c.Request.Context()).Create(&models.FormSubmission{
+	if err := h.shares().RecordSubmission(c.Request.Context(), &models.FormSubmission{
 		ShareID:      share.ID,
 		ResourceName: share.ResourceName,
 		RecordID:     out.ID,
 		IP:           c.ClientIP(),
 		UserAgent:    ua,
-	}).Error; err != nil {
+	}); err != nil {
 		log.Printf("form share %s: writing the audit row for record %s: %v", share.ID, out.ID, err)
 	}
 
@@ -328,17 +327,8 @@ func (h *FormShareHandler) PublicSubmit(c *gin.Context) {
 // Filterable by share_id and resource_name; defaults to the 100 most
 // recent rows. v3.31.25.
 func (h *FormShareHandler) ListSubmissions(c *gin.Context) {
-	var rows []models.FormSubmission
-	q := h.DB.WithContext(c.Request.Context()).Order("created_at DESC").Limit(100)
-
-	if shareID := c.Query("share_id"); shareID != "" {
-		q = q.Where("share_id = ?", shareID)
-	}
-	if resourceName := c.Query("resource_name"); resourceName != "" {
-		q = q.Where("resource_name = ?", resourceName)
-	}
-
-	if err := q.Find(&rows).Error; err != nil {
+	rows, err := h.shares().Submissions(c.Request.Context(), c.Query("share_id"), c.Query("resource_name"), 100)
+	if err != nil {
 		respond.ServerError(c, "INTERNAL_ERROR", err, "Internal server error")
 		return
 	}

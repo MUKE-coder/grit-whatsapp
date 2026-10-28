@@ -202,7 +202,7 @@ export function FormActions({
         <button
           type="submit"
           disabled={isPending}
-          className="h-9 px-3.5 rounded-lg bg-accent text-white text-[13px] font-medium hover:bg-accent-hover disabled:opacity-60"
+          className="h-9 px-3.5 rounded-lg bg-accent text-accent-fg text-[13px] font-medium hover:bg-accent-hover disabled:opacity-60"
         >
           {isPending ? "Saving..." : submitLabel}
         </button>

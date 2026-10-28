@@ -55,7 +55,7 @@ export function AtlasAuthShell({ theme, mode, title, subtitle, children, errorMe
         style={{ background: t.heroBg, color: t.heroFg }}
       >
         <div className="flex items-center gap-2 text-2xl font-bold">
-          <BrandMark />
+          <BrandMark color={t.primary} fg={t.primaryFg} />
           <span style={{ fontFamily: f.display }}>{brand.name}</span>
         </div>
 
@@ -69,18 +69,19 @@ export function AtlasAuthShell({ theme, mode, title, subtitle, children, errorMe
           <p className="text-lg opacity-80">{brand.description}</p>
         </div>
 
-        <p className="text-sm opacity-60">Built with Grit — Go + React framework</p>
+        <p className="text-sm opacity-60">Built with Grit: Go + React framework</p>
       </div>
 
-      {/* Right form panel */}
-      <div
+      {/* Right form panel. main, not div: this is the page's content, and
+          landmarks are how somebody skips the hero panel to reach it. */}
+      <main
         className="flex flex-1 items-center justify-center px-6 py-12"
         style={{ background: t.bg }}
       >
         <div className="w-full max-w-md space-y-8">
           {/* Brand for sub-lg breakpoints */}
           <div className="lg:hidden flex items-center justify-center gap-2 text-2xl font-bold" style={{ color: t.primary }}>
-            <BrandMark />
+            <BrandMark color={t.primary} fg={t.primaryFg} />
             <span style={{ fontFamily: f.display }}>{brand.name}</span>
           </div>
 
@@ -114,19 +115,22 @@ export function AtlasAuthShell({ theme, mode, title, subtitle, children, errorMe
             </Link>
           </p>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
 
-function BrandMark() {
+// The brand colour, not a wash of the hero's own background: six of the eight
+// themes have a light hero panel, and white on fifteen percent white is nothing
+// at all. The letter was invisible on every one of them.
+function BrandMark({ color, fg }: { color: string; fg: string }) {
   if (brand.logo.image) {
     return <img src={brand.logo.image} alt={brand.name} className="h-8 w-8" />;
   }
   return (
     <span
-      className="inline-flex h-8 w-8 items-center justify-center rounded-md text-white font-bold"
-      style={{ background: "rgba(255,255,255,0.15)" }}
+      className="inline-flex h-8 w-8 items-center justify-center rounded-md font-bold"
+      style={{ background: color, color: fg }}
     >
       {brand.logo.text}
     </span>

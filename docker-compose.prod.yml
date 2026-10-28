@@ -8,9 +8,17 @@
 # domain.com → `api:8080`, app.domain.com → `admin:3000`, etc.
 #
 # Postgres and Redis have NO host binding at all — they're reachable
-# only by containers on the `whatsapp` network. That's the property you
+# only by containers on this stack's own network. That is the property you
 # want: a successful host-level compromise still has to pop a container
 # to reach the database.
+#
+# That network is Compose's implicit <project>_default, and this file
+# deliberately declares none of its own. Docker slices bridge subnets out
+# of 172.17.0.0/12 in /16 blocks, which is about sixteen networks for the
+# entire daemon, and it does not release them when a deploy fails or a
+# project is deleted. A named network here would take a second subnet and
+# buy nothing the default does not already give. On a host whose pool is
+# already full, use docker-compose.shared-network.yml, which creates none.
 #
 # MinIO is included as an option but most production deployments use
 # Cloudflare R2 or AWS S3 (see STORAGE_* in .env). Delete the minio
@@ -28,7 +36,6 @@ services:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
-    container_name: whatsapp-api
     restart: unless-stopped
     expose:
       - "8080"
@@ -55,8 +62,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - whatsapp
 
   web:
     build:
@@ -67,12 +72,9 @@ services:
     environment:
       # Server-rendered pages call the API over the Docker network.
       API_INTERNAL_URL: http://api:8080
-    container_name: whatsapp-web
     restart: unless-stopped
     expose:
       - "3000"
-    networks:
-      - whatsapp
 
   admin:
     build:
@@ -80,16 +82,12 @@ services:
       dockerfile: apps/admin/Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${API_URL:-http://localhost:8080}
-    container_name: whatsapp-admin
     restart: unless-stopped
     expose:
       - "3000"
-    networks:
-      - whatsapp
 
   postgres:
     image: postgres:16-alpine
-    container_name: whatsapp-postgres
     restart: unless-stopped
     # Only the settings Postgres reads, from the same .env the api uses. With
     # env_file it was handed all of .env: the JWT secret, the Sentinel keys and
@@ -106,8 +104,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - whatsapp
 
   # Connection pooler. Postgres forks a backend process per connection, so
   # connection count — not query load — is usually what falls over first. The
@@ -128,7 +124,6 @@ services:
   # (30 by default) per replica.
   pgbouncer:
     image: edoburu/pgbouncer:v1.25.2-p0
-    container_name: whatsapp-pgbouncer
     restart: unless-stopped
     depends_on:
       postgres:
@@ -154,12 +149,9 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks:
-      - whatsapp
 
   redis:
     image: redis:7-alpine
-    container_name: whatsapp-redis
     restart: unless-stopped
     # A password, with no default. Anything on the Docker network could otherwise
     # read the cache and the job queue. REDISCLI_AUTH lets the health check in.
@@ -173,12 +165,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - whatsapp
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: whatsapp-minio
+    image: alpine/minio:RELEASE.2025-10-15T17-29-55Z
     restart: unless-stopped
     # Only its root credentials, with no default. Presigned uploads put MinIO
     # behind the public proxy, where minioadmin/minioadmin is the whole bucket.
@@ -187,13 +176,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?set MINIO_SECRET_KEY in .env}
     volumes:
       - minio-data:/data
-    networks:
-      - whatsapp
     command: server /data --console-address ":9001"
-
-networks:
-  whatsapp:
-    driver: bridge
 
 volumes:
   postgres-data:

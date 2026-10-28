@@ -62,8 +62,23 @@ func SeedAPIKeys(db *gorm.DB) error {
 			log.Println("               endpoints marked public, and nothing else.")
 		}
 		if secret != "" {
-			log.Printf("  Secret       %s", secret)
-			log.Println("               Server side only. Shown once, right now.")
+			// Outside development the secret is not printed. It is a live
+			// server-to-server credential, and a log line is a place it
+			// outlives the terminal: shipped to an aggregator, kept for
+			// ninety days, readable by everyone who can read logs.
+			//
+			// The same judgement the password reset handler already makes
+			// about a reset link, and the users seeder about the development
+			// password. This was the one that still printed.
+			if seedDevDefaults() {
+				log.Printf("  Secret       %s", secret)
+				log.Println("               Server side only. Shown once, right now.")
+			} else {
+				log.Println("  Secret       created, and not printed: APP_ENV is not")
+				log.Println("               development and a live key in a log file is a")
+				log.Println("               credential. Issue one you can see in the admin,")
+				log.Println("               at Settings, API Keys.")
+			}
 		}
 		log.Println("  Manage both in the admin at Settings, API Keys.")
 		log.Println("================================================================")
@@ -99,6 +114,17 @@ func ensureKey(db *gorm.DB, want models.APIKey) (string, error) {
 }
 
 // apiOrigin is where the browser should call this API.
+// apiPort is the port the API listens on, as a string. The Expo app needs the
+// port without a host: it derives the host from Metro, because a phone cannot
+// reach localhost.
+func apiPort() string {
+	cfg, err := config.Load()
+	if err != nil || cfg == nil || cfg.Port == "" {
+		return "8080"
+	}
+	return cfg.Port
+}
+
 func apiOrigin() string {
 	cfg, err := config.Load()
 	if err != nil || cfg == nil || cfg.Port == "" {
@@ -144,40 +170,134 @@ func storageOrigin() string {
 //
 // Only ever written when absent. Overwriting somebody's env file because a
 // seeder ran is the kind of helpfulness that loses an afternoon.
+//
+// It does say so when the file holds a key this database will not accept,
+// which is what grit migrate --fresh leaves behind: the keys table is dropped,
+// the seeder mints a new one, and the file still names the old one. Every
+// public request then answers INVALID_API_KEY with nothing to connect that to
+// a file the seeder decided not to touch.
 func writeClientEnv(publishable string) {
 	if publishable == "" {
 		return
 	}
+	// Every frontend this project might have, relative to where the seeder runs.
+	//
+	// In a monorepo that is apps/api, so the other apps are one level up.
+	// In a single project the Go module is the root, so its one frontend is
+	// frontend/ right here. A single project got neither path and so got no
+	// .env.local at all: its frontend fell back to localhost:8080 whatever the
+	// API was actually listening on, and had no publishable key, so every public
+	// endpoint answered INVALID_API_KEY. A directory that is not part of this
+	// project is skipped below, so listing all of them is safe in all of them.
 	for _, rel := range []string{
 		filepath.Join("..", "web", ".env.local"),
 		filepath.Join("..", "admin", ".env.local"),
+		filepath.Join("..", "expo", ".env.local"),
+		// A single project's frontend is the project root, and the seeder runs from
+		// api/ beside it. The old flat layout kept it in frontend/ from the root,
+		// which is the second path: an upgraded project still gets its file.
+		filepath.Join("..", ".env.local"),
+		filepath.Join("frontend", ".env.local"),
 	} {
-		if _, err := os.Stat(filepath.Dir(rel)); err != nil {
+		dir := filepath.Dir(rel)
+		// A frontend, not merely a directory. "../" is the project root for a
+		// single project and the apps/ folder for a monorepo, and only one of
+		// those is somewhere an .env.local belongs: a package.json is what tells
+		// them apart. Before this the test was "does the directory exist", which
+		// "../" always satisfies.
+		if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
 			continue // that app is not part of this project
 		}
-		if _, err := os.Stat(rel); err == nil {
-			continue // already there
+		prefix := clientEnvPrefix(dir)
+		if existing, err := os.ReadFile(rel); err == nil {
+			if stale := storedKey(string(existing)); stale != "" && stale != publishable {
+				log.Printf("  ! %s still names a key this database does not have.", rel)
+				log.Printf("    Public requests will answer INVALID_API_KEY until you set")
+				log.Printf("    %sAPI_KEY=%s", prefix, publishable)
+			}
+			continue // never overwritten
 		}
-		body := "# Written by the seeder. Only ever created, never overwritten." + "\n" +
-			"\n" +
-			"# Publishable API key. Safe to ship to a browser: it reaches public" + "\n" +
-			"# endpoints only." + "\n" +
-			"NEXT_PUBLIC_API_KEY=" + publishable + "\n" +
-			"\n" +
-			"# Where this app calls the API." + "\n" +
-			"NEXT_PUBLIC_API_URL=" + apiOrigin() + "\n" +
-			"\n" +
-			"# Browser-facing origin of stored files." + "\n" +
-			"#" + "\n" +
-			"# Both of these end up in the Content-Security-Policy. Uploads are" + "\n" +
-			"# presigned PUTs made straight from the browser to object storage," + "\n" +
-			"# so an origin missing from connect-src is an upload the browser" + "\n" +
-			"# refuses, reporting it only as a CSP violation in the console." + "\n" +
-			"#" + "\n" +
-			"# In production set this to your S3, R2 or CDN origin." + "\n" +
-			"NEXT_PUBLIC_STORAGE_URL=" + storageOrigin() + "\n"
-		if err := os.WriteFile(rel, []byte(body), 0o644); err == nil {
+		if err := os.WriteFile(rel, []byte(clientEnvBody(prefix, publishable)), 0o644); err == nil {
 			log.Printf("  Wrote %s", rel)
 		}
 	}
+}
+
+// clientEnvPrefix is the prefix the app in dir reads its public variables
+// under. Each bundler exposes only its own, so writing the wrong one produces
+// a file that is read by nothing and explains nothing.
+func clientEnvPrefix(dir string) string {
+	for _, name := range []string{"vite.config.ts", "vite.config.js", "vite.config.mjs"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return "VITE_"
+		}
+	}
+	// Metro is the Expo bundler and nothing else here has its config. A file
+	// test rather than a search for a key inside app.json: the same shape as
+	// the Vite test above, and it cannot be fooled by a string in a comment.
+	for _, name := range []string{"metro.config.js", "metro.config.cjs"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return "EXPO_PUBLIC_"
+		}
+	}
+	return "NEXT_PUBLIC_"
+}
+
+// clientEnvBody is the file, in the names that app reads.
+func clientEnvBody(prefix, publishable string) string {
+	body := "# Written by the seeder. Only ever created, never overwritten." + "\n" +
+		"\n" +
+		"# Publishable API key. Safe to ship to a client: it reaches public" + "\n" +
+		"# endpoints only." + "\n" +
+		prefix + "API_KEY=" + publishable + "\n" +
+		"\n"
+
+	if prefix == "EXPO_PUBLIC_" {
+		// A port, not a URL, because a phone cannot reach localhost: that
+		// address is the phone. The app derives the dev machine's LAN address
+		// from the host Metro is already served on and needs only the port to
+		// go with it, so naming the port here moves the app with APP_PORT and
+		// keeps working on a real device. Set EXPO_PUBLIC_API_URL instead to
+		// point at a deployed backend, which wins over both.
+		return body +
+			"# The port the API listens on, to go with the LAN address the app" + "\n" +
+			"# derives from Metro. Set EXPO_PUBLIC_API_URL instead to point at a" + "\n" +
+			"# deployed backend." + "\n" +
+			prefix + "API_PORT=" + apiPort() + "\n" +
+			"\n" +
+			"# Origin of stored files, for images the app displays." + "\n" +
+			prefix + "STORAGE_URL=" + storageOrigin() + "\n"
+	}
+
+	return body +
+		"# Where this app calls the API." + "\n" +
+		prefix + "API_URL=" + apiOrigin() + "\n" +
+		"\n" +
+		"# Browser-facing origin of stored files." + "\n" +
+		"#" + "\n" +
+		"# Both of these end up in the Content-Security-Policy. Uploads are" + "\n" +
+		"# presigned PUTs made straight from the browser to object storage," + "\n" +
+		"# so an origin missing from connect-src is an upload the browser" + "\n" +
+		"# refuses, reporting it only as a CSP violation in the console." + "\n" +
+		"#" + "\n" +
+		"# In production set this to your S3, R2 or CDN origin." + "\n" +
+		prefix + "STORAGE_URL=" + storageOrigin() + "\n"
+}
+
+// storedKey pulls NEXT_PUBLIC_API_KEY out of an env file, or "" when it has
+// none. Written by hand rather than with a parser: one key, one line, and a
+// dependency for this would be absurd.
+func storedKey(body string) string {
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		for _, prefix := range []string{"NEXT_PUBLIC_", "VITE_", "EXPO_PUBLIC_"} {
+			if value, ok := strings.CutPrefix(line, prefix+"API_KEY="); ok {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
 }

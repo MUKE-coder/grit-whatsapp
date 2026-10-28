@@ -84,6 +84,69 @@ func Auth(db *gorm.DB, authService *services.AuthService) gin.HandlerFunc {
 	}
 }
 
+// Identify is Auth without the wall: it reads the session if there is one and
+// lets the request through either way.
+//
+// It exists for the public pages that are not the same page for everybody. A
+// catalogue that marks what the reader already owns, a pricing page that knows
+// their current plan, an article with their own comment on it: each has to be
+// readable signed out, which means no guard, which with Auth alone means the
+// handler cannot tell who is reading even when they are signed in. Every app
+// that wants this ends up parsing the Authorization header by hand in a
+// handler, and that is how the cookie flow gets forgotten.
+//
+// It sets exactly what Auth sets, so c.GetString("user_id") reads the same on
+// both kinds of route, and nothing else changes: a missing, malformed, expired
+// or revoked token is simply an anonymous request, not a 401.
+//
+// It is not a guard and cannot be used as one. A handler behind Identify must
+// treat "there is a user" as information, never as permission: anything that
+// must not be served to a stranger belongs behind Auth.
+func Identify(db *gorm.DB, authService *services.AuthService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Same two places Auth looks, in the same order: the HttpOnly cookie
+		// browsers use, then the bearer header native clients use.
+		token := ""
+		if cookieValue, err := c.Cookie("grit_access"); err == nil && cookieValue != "" {
+			token = cookieValue
+		} else if authHeader := c.GetHeader("Authorization"); authHeader != "" {
+			if parts := strings.SplitN(authHeader, " ", 2); len(parts) == 2 && parts[0] == "Bearer" {
+				token = parts[1]
+			}
+		}
+		if token == "" {
+			c.Next()
+			return
+		}
+
+		claims, err := authService.ValidateAccessToken(token)
+		if err != nil {
+			c.Next()
+			return
+		}
+
+		var user models.User
+		if err := db.WithContext(c.Request.Context()).Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+			c.Next()
+			return
+		}
+		if !user.Active {
+			c.Next()
+			return
+		}
+
+		c.Set("user", user)
+		c.Set("user_id", user.ID)
+		c.Set("user_email", user.Email)
+		c.Set("user_role", user.Role)
+		if grants, err := authz.GrantsFor(db, user.ID); err == nil {
+			c.Set("user_grants", grants)
+		}
+
+		c.Next()
+	}
+}
+
 // RequireRole guards a route by role name, permission, or both.
 //
 // Each argument is either a legacy role name ("ADMIN") or a permission key

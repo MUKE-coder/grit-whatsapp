@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import type { ResourceDefinition, FieldDefinition, GroupDefinition } from "@/lib/resource";
 import { writableValues } from "@/lib/form-values";
-import { FieldRenderer } from "@/components/forms/form-builder";
+import { FieldRenderer, useConditionalFields } from "@/components/forms/form-builder";
 import { useResourceItem, usePatchResource } from "@/hooks/use-resource";
 import { ChevronLeft, Loader2 } from "@/lib/icons";
 import { buttonClasses } from "@/components/ui/button";
@@ -109,6 +109,8 @@ function GroupCard({ resource, group, record, id }: GroupCardProps) {
     if (!isDirty) setIsDirty(true);
   });
 
+  const visibleGroupFields = useConditionalFields(groupFields, control);
+
   const onSave = handleSubmit((values) => {
     // Send only the values belonging to this group — that's the whole
     // point of PATCH-per-group.
@@ -125,7 +127,7 @@ function GroupCard({ resource, group, record, id }: GroupCardProps) {
       </header>
 
       <form onSubmit={onSave} className="space-y-4">
-        {groupFields.map((field) => (
+        {visibleGroupFields.map((field) => (
           <FieldRenderer key={field.key} field={field} control={control} errors={errors} getValues={getValues} />
         ))}
 

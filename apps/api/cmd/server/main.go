@@ -31,6 +31,8 @@ import (
 	"whatsapp/apps/api/internal/routes"
 	"whatsapp/apps/api/internal/services"
 	"whatsapp/apps/api/internal/storage"
+
+	"whatsapp/apps/api/internal/devserver"
 )
 
 func main() {
@@ -38,6 +40,18 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// The port, before anything else.
+	//
+	// Bound here rather than at ListenAndServe so that a port already in use
+	// is the FIRST thing printed. It used to be the last, one line after the
+	// route dump, and on a hot reload that line scrolls past while the
+	// previous build keeps answering with the code from before the edit
+	// (grit#110).
+	listener, err := devserver.Listen(cfg.Port, cfg.AppEnv)
+	if err != nil {
+		log.Fatal(devserver.ExplainBindFailure(cfg.Port, cfg.AppEnv, err))
 	}
 
 	// Connect to database
@@ -179,6 +193,11 @@ func main() {
 		oauthProviders = append(oauthProviders, google.New(
 			cfg.GoogleClientID, cfg.GoogleClientSecret,
 			cfg.AppURL+"/api/auth/oauth/google/callback",
+			// goth defaults to ["email"] when no scope is given, and with only
+			// that Google returns no name and no picture: every account signed
+			// up through Google was created as "User" with a blank avatar.
+			// "profile" is what asks for them.
+			"email", "profile",
 		))
 		log.Println("Google OAuth2 configured")
 	}
@@ -245,7 +264,7 @@ func main() {
 	// Start cron scheduler, for the same reason and on the same condition.
 	var cronScheduler *cron.Scheduler
 	if cfg.RedisURL != "" && redisReachable {
-		cs, err := cron.New(cfg.RedisURL)
+		cs, err := cron.New(cfg.RedisURL, cfg.SecurityAutoBanEvery)
 		if err != nil {
 			log.Printf("Warning: Cron scheduler failed to start: %v", err)
 		} else {
@@ -284,6 +303,17 @@ func main() {
 		}
 	}()
 
+	// Shutdown signalling, set up before the server so the development
+	// step-aside endpoint can use the same path Ctrl+C does.
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// Development only: let the next build of this server ask this one to go,
+	// so a rebuild does not end with two servers and the older one winning.
+	devserver.MountStepAside(router, cfg.AppEnv, func() {
+		quit <- syscall.SIGTERM
+	})
+
 	// Create server
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),
@@ -314,14 +344,12 @@ func main() {
 		if cfg.SentinelEnabled {
 			log.Printf("Sentinel dashboard at http://localhost:%s/sentinel/ui", cfg.Port)
 		}
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
 
 	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	log.Println("Shutting down server...")

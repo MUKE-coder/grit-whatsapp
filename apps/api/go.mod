@@ -5,7 +5,7 @@ module whatsapp/apps/api
 // behind the SAML sign-in path, before anyone has signed in. The go directive is
 // also what CI, setup-go and the release workflow install, and an older Go
 // downloads this one, so raising it here raises it everywhere.
-go 1.26.6
+go 1.26.10
 
 require (
 	// Pure-Go WebP, so image optimisation does not cost the static
@@ -13,8 +13,8 @@ require (
 	// lossy WebP encoder, which is why lossy compression targets JPEG.
 	github.com/HugoSmits86/nativewebp v1.3.0
 	github.com/MUKE-coder/gin-docs v0.0.0-20260222113017-4d647cb4e7aa
-	github.com/MUKE-coder/gorm-studio v1.1.0
-	github.com/MUKE-coder/pulse v1.0.0
+	github.com/MUKE-coder/gorm-studio v1.1.1
+	github.com/MUKE-coder/pulse v1.5.1
 	// Sentinel now ships a proper /v2 module path, so we track real tags.
 	// v2.1.1 is the minimum safe release for WAF.Mode = ModeBlock: v2.1.0
 	// fixed the SSRF rule matching "0.0.0.0" inside a Chrome User-Agent
@@ -26,7 +26,7 @@ require (
 	// v2.2.2 is a security release (client-IP spoofing behind a proxy, a
 	// sort_by SQL injection, SSRF bypasses), and v2.5.0 keeps rate limits and
 	// lockouts in Redis, so every replica counts against the same numbers.
-	github.com/MUKE-coder/sentinel/v2 v2.5.0
+	github.com/MUKE-coder/sentinel/v2 v2.8.0
 	github.com/aws/aws-sdk-go-v2 v1.43.0
 	github.com/aws/aws-sdk-go-v2/config v1.32.31
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.30
@@ -63,7 +63,7 @@ require (
 	// CVE-2026-54063 and CVE-2026-59161: the worksheet and streaming
 	// parsers could be made to allocate without bound, and this is what
 	// the CSV/XLSX importer hands user uploads to.
-	github.com/xuri/excelize/v2 v2.11.0
+	github.com/xuri/excelize/v2 v2.11.1-0.20261003002531-6258dcebc4e2
 	golang.org/x/crypto v0.57.0
 	// singleflight, which collapses concurrent cache misses in middleware/cache.go.
 	golang.org/x/sync v0.23.0
@@ -76,13 +76,18 @@ require (
 require (
 	github.com/davidbyttow/govips/v2 v2.19.0
 	github.com/glebarez/sqlite v1.11.0
+	github.com/go-playground/validator/v10 v10.27.0
 	github.com/stretchr/testify v1.12.1
-	golang.org/x/net v0.58.0
+	go.opentelemetry.io/otel v1.45.0
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.45.0
+	go.opentelemetry.io/otel/sdk v1.45.0
+	go.opentelemetry.io/otel/trace v1.45.0
+	golang.org/x/net v0.59.0
 	gorm.io/driver/sqlite v1.6.0
 )
 
 require (
-	cloud.google.com/go/compute/metadata v0.3.0 // indirect
+	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.14 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.31 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.31 // indirect
@@ -101,6 +106,7 @@ require (
 	github.com/beevik/etree v1.6.0 // indirect
 	github.com/bytedance/sonic v1.14.0 // indirect
 	github.com/bytedance/sonic/loader v0.3.0 // indirect
+	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -111,10 +117,11 @@ require (
 	github.com/gin-contrib/cors v1.7.2 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
 	github.com/glebarez/go-sqlite v1.21.2 // indirect
+	github.com/go-logr/logr v1.4.4 // indirect
+	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
-	github.com/go-playground/validator/v10 v10.27.0 // indirect
 	github.com/go-sql-driver/mysql v1.8.1 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/go-webauthn/x v0.3.0 // indirect
@@ -122,10 +129,12 @@ require (
 	github.com/goccy/go-yaml v1.18.0 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
-	github.com/golang/protobuf v1.5.3 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/google/pprof v0.0.0-20250501235452-c0086092b71a // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
@@ -147,7 +156,7 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	github.com/richardlehane/mscfb v1.0.7 // indirect
+	github.com/richardlehane/mscfb v1.0.8 // indirect
 	github.com/richardlehane/msoleps v1.0.6 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.4 // indirect
@@ -159,16 +168,23 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xuri/efp v0.0.1 // indirect
+	github.com/xuri/efp v0.0.2 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.45.0 // indirect
+	go.opentelemetry.io/otel/metric v1.45.0 // indirect
+	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/arch v0.20.0 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/time v0.0.0-20190308202827-9d24e82272b4 // indirect
-	google.golang.org/protobuf v1.36.9 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260803160001-6ac0973c030d // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260803160001-6ac0973c030d // indirect
+	google.golang.org/grpc v1.83.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
@@ -193,6 +209,6 @@ require (
 	// v0.5.1 is its newest release and still asks for the vulnerable version.
 	github.com/russellhaering/goxmldsig v1.6.0 // CVE-2026-33487
 	golang.org/x/image v0.45.0 // indirect; GO-2026-5066, -5062, -5032, -5031, -4815, CVE-2026-46603
-	golang.org/x/oauth2 v0.27.0 // indirect; CVE-2025-22868
+	golang.org/x/oauth2 v0.36.0 // indirect; CVE-2025-22868
 	golang.org/x/text v0.42.0 // indirect; GO-2026-5970
 )

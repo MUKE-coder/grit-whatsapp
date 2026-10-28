@@ -18,6 +18,7 @@ export function TextareaField({ field, value, onChange, error }: TextareaFieldPr
         {field.required && <span className="text-danger ml-1">*</span>}
       </label>
       <textarea
+        id={fieldId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={field.placeholder}

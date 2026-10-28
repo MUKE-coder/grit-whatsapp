@@ -81,3 +81,8 @@ next-env.d.ts
 .agents/
 .claude/skills/grit-*
 skills-lock.json
+
+# Next.js writes these for AI assistants when it runs. Generated, per-machine,
+# and not part of the blueprint.
+apps/*/AGENTS.md
+apps/*/CLAUDE.md

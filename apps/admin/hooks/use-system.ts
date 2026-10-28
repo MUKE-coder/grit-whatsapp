@@ -54,6 +54,24 @@ export function useObservabilitySummary<T = Record<string, unknown>>() {
   });
 }
 
+// The scaling report: percentiles, connection use, the slowest queries, the
+// cache hit rate, one verdict, and the stage-by-stage state of this deployment.
+// Admin only, because it reports connection counts and query shapes.
+//
+// Polled a good deal slower than the observability summary: it runs several
+// statistics queries against Postgres, and nothing it reports changes in ten
+// seconds.
+export function useScaleReport<T = Record<string, unknown>>() {
+  return useQuery<T>({
+    queryKey: ["admin", "scale", "report"],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/api/scale");
+      return (data?.data ?? data) as T;
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 export function useJobStats() {
   return useQuery<QueueStats[]>({
     queryKey: ["admin", "jobs", "stats"],

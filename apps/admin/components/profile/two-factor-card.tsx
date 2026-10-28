@@ -10,9 +10,12 @@ import {
   useRegenerateBackupCodes,
   useRevokeTrustedDevice,
 } from "@/hooks/use-auth";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
 import { ShieldCheck, Loader2, Copy, Check, Monitor, X } from "@/lib/icons";
 import { describeDevice } from "@/components/profile/active-sessions";
 import { Button, buttonClasses } from "@/components/ui/button";
+import { inputClasses } from "@/components/ui/input";
 
 /** Recovery codes are unrecoverable once dismissed — see the file header. */
 function BackupCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
@@ -44,7 +47,7 @@ function BackupCodes({ codes, onDone }: { codes: string[]; onDone: () => void })
   return (
     <div className="rounded-lg border border-warning/40 bg-warning/[0.06] p-4">
       <p className="text-sm font-medium text-foreground mb-1">Save your backup codes</p>
-      <p className="text-xs text-foreground-secondary mb-3">
+      <p className="text-xs text-text-secondary mb-3">
         Each code works once, if you lose your authenticator. This is the only time they are
         shown — the server keeps only hashes.
       </p>
@@ -87,11 +90,45 @@ function BackupCodes({ codes, onDone }: { codes: string[]; onDone: () => void })
   );
 }
 
+/**
+ * Ask for a code, to prove the mailbox works before email becomes the second
+ * factor. Turning on a factor you cannot receive is how an account locks
+ * itself out, so it is deliberately two steps.
+ */
+export function useSendEmailSetupCode() {
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await apiClient.post<{ data: { sent_to: string } }>(
+        "/api/auth/totp/email/send",
+        {},
+      );
+      return data.data;
+    },
+  });
+}
+
+/** Confirm that code, and turn it on. */
+export function useEnableEmailTwoFactor() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (code: string) => {
+      const { data } = await apiClient.post<{ data: { backup_codes: string[]; method: string } }>(
+        "/api/auth/totp/email/enable",
+        { code: code.trim() },
+      );
+      return data.data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["totp-status"] }),
+  });
+}
+
 export function TwoFactorCard() {
   const { data: status, isLoading } = useTOTPStatus();
   const { data: devices } = useTrustedDevices(!!status?.enabled);
   const setup = useTOTPSetup();
   const enable = useEnableTOTP();
+  const sendEmailCode = useSendEmailSetupCode();
+  const enableEmail = useEnableEmailTwoFactor();
   const disable = useDisableTOTP();
   const regenerate = useRegenerateBackupCodes();
   const revoke = useRevokeTrustedDevice();
@@ -103,6 +140,9 @@ export function TwoFactorCard() {
   const [password, setPassword] = useState("");
   const [disabling, setDisabling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Mid-setup for the email method: the address it went to, and the digits.
+  const [emailSetupSentTo, setEmailSetupSentTo] = useState<string | null>(null);
+  const [emailCode, setEmailCode] = useState("");
 
   const errText = (e: unknown) =>
     (e as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
@@ -136,6 +176,26 @@ export function TwoFactorCard() {
     );
   };
 
+  const startEmailSetup = () => {
+    setError(null);
+    sendEmailCode.mutate(undefined, {
+      onSuccess: (d) => setEmailSetupSentTo(d.sent_to),
+      onError: (e) => setError(errText(e)),
+    });
+  };
+
+  const confirmEmailSetup = () => {
+    setError(null);
+    enableEmail.mutate(emailCode, {
+      onSuccess: (d) => {
+        setCodes(d.backup_codes);
+        setEmailSetupSentTo(null);
+        setEmailCode("");
+      },
+      onError: (e) => setError(errText(e)),
+    });
+  };
+
   const confirmDisable = () => {
     setError(null);
     disable.mutate(password, {
@@ -149,19 +209,21 @@ export function TwoFactorCard() {
 
   if (isLoading) {
     return (
-      <div className="rounded-xl border border-border bg-bg-secondary p-6">
+      <div className="rounded-xl border border-border bg-bg-elevated p-6">
         <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-border bg-bg-secondary overflow-hidden">
-      <div className="flex items-start gap-3 border-b border-border px-6 py-4">
-        <ShieldCheck className="mt-0.5 h-4 w-4 text-accent" />
+    <div className="rounded-xl border border-border bg-bg-elevated p-6">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/10 text-accent">
+          <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+        </span>
         <div className="min-w-0">
-          <h2 className="font-semibold text-foreground">Two-factor authentication</h2>
-          <p className="text-sm text-foreground-secondary">
+          <h2 className="text-base font-semibold text-foreground">Two-factor authentication</h2>
+          <p className="mt-1 text-sm leading-relaxed text-text-muted">
             A code from your authenticator app, on top of your password.
           </p>
         </div>
@@ -177,7 +239,7 @@ export function TwoFactorCard() {
         </span>
       </div>
 
-      <div className="space-y-5 p-6">
+      <div className="mt-5 space-y-5">
         {error && (
           <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>
         )}
@@ -185,10 +247,57 @@ export function TwoFactorCard() {
         {codes && <BackupCodes codes={codes} onDone={() => setCodes(null)} />}
 
         {/* ── Off, and not mid-setup ── */}
-        {!status?.enabled && !secret && !codes && (
-          <Button onClick={startSetup} loading={setup.isPending}>
-            Turn on two-factor
-          </Button>
+        {!status?.enabled && !secret && !codes && !emailSetupSentTo && (
+          <div className="flex flex-wrap gap-2">
+            {/* The app first, and not only for looks: a code in an
+                authenticator never leaves the device, while a code by email is
+                only as safe as the mailbox, which is also where a password
+                reset goes. */}
+            <Button onClick={startSetup} loading={setup.isPending}>
+              Set up an authenticator app
+            </Button>
+            <Button variant="outline" onClick={startEmailSetup} loading={sendEmailCode.isPending}>
+              Use OTP code via email
+            </Button>
+          </div>
+        )}
+
+        {/* ── Mid-setup by email: prove the mailbox works ── */}
+        {emailSetupSentTo && !codes && (
+          <div className="space-y-3">
+            <p className="text-sm text-text-secondary">
+              We sent a code to <span className="font-medium text-foreground">{emailSetupSentTo}</span>.
+              Enter it to turn this on, so nothing is switched on that you cannot receive.
+            </p>
+            <div className="flex flex-wrap items-end gap-2">
+              <div className="space-y-1.5">
+                <label htmlFor="two-factor-email-code" className="block text-xs font-medium text-text-secondary">
+                  The code from your email
+                </label>
+                <input
+                  id="two-factor-email-code"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  value={emailCode}
+                  onChange={(e) => setEmailCode(e.target.value.replace(/[^0-9]/g, ""))}
+                  className={inputClasses({ className: "w-40 font-mono text-lg tracking-[0.3em]" })}
+                />
+              </div>
+              <Button onClick={confirmEmailSetup} loading={enableEmail.isPending} disabled={emailCode.length !== 6}>
+                Turn it on
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setEmailSetupSentTo(null);
+                  setEmailCode("");
+                }}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
         )}
 
         {/* ── Mid-setup: scan, then confirm with a live code ── */}
@@ -200,7 +309,7 @@ export function TwoFactorCard() {
             </div>
 
             <div className="min-w-0 space-y-3">
-              <p className="text-sm text-foreground-secondary">
+              <p className="text-sm text-text-secondary">
                 Scan this with Google Authenticator, 1Password, Authy or similar. Cannot scan?
                 Enter this key by hand:
               </p>
@@ -215,7 +324,7 @@ export function TwoFactorCard() {
                   placeholder="000000"
                   inputMode="numeric"
                   maxLength={6}
-                  className="w-32 rounded-lg border border-border bg-bg-primary px-3 py-2 text-center font-mono tracking-[0.3em] text-foreground"
+                  className="w-32 rounded-lg border border-border bg-background px-3 py-2 text-center font-mono tracking-[0.3em] text-foreground"
                 />
                 <Button
                   onClick={confirmEnable}
@@ -240,7 +349,7 @@ export function TwoFactorCard() {
         {status?.enabled && !codes && (
           <>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="text-sm text-foreground-secondary">
+              <span className="text-sm text-text-secondary">
                 {status.backup_codes_remaining} backup code
                 {status.backup_codes_remaining === 1 ? "" : "s"} left
               </span>
@@ -318,10 +427,11 @@ export function TwoFactorCard() {
                 <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="password"
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="Confirm your password"
-                    className="w-56 rounded-lg border border-border bg-bg-primary px-3 py-2 text-sm text-foreground"
+                    className="w-56 rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground"
                   />
                   <button
                     type="button"

@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { useTheme } from "@/lib/theme";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -46,6 +47,7 @@ function ProfileRow({
 
 export default function ProfileScreen() {
   const { user, logout, refreshUser } = useAuth();
+  const { palette } = useTheme();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -187,7 +189,7 @@ export default function ProfileScreen() {
         </View>
 
         <TouchableOpacity
-          className={`rounded-xl py-4 items-center mb-3 ${saving ? "bg-[#6c5ce7]/50" : "bg-[#6c5ce7]"}`}
+          className={`rounded-xl py-4 items-center mb-3 ${saving ? "bg-accent/50" : "bg-accent"}`}
           onPress={handleSubmit(onSave)}
           disabled={saving}
           activeOpacity={0.8}
@@ -214,14 +216,14 @@ export default function ProfileScreen() {
     <ScrollView className="flex-1 bg-[#F4F4F6] dark:bg-[#0a0a0f]" contentContainerClassName="px-6 pt-16 pb-28">
       <View className="items-center mb-8 mt-4">
         <TouchableOpacity onPress={onChangeAvatar} activeOpacity={0.85} className="mb-4">
-          <View className="w-24 h-24 rounded-full bg-[#6c5ce7] items-center justify-center overflow-hidden">
+          <View className="w-24 h-24 rounded-full bg-accent items-center justify-center overflow-hidden">
             {user?.avatar ? (
               <Image source={{ uri: user.avatar }} style={{ width: "100%", height: "100%" }} contentFit="cover" />
             ) : (
               <Text className="text-3xl font-bold text-white">{initials}</Text>
             )}
           </View>
-          <View className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#6c5ce7] border-2 border-[#F4F4F6] dark:border-[#0a0a0f] items-center justify-center">
+          <View className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-accent border-2 border-[#F4F4F6] dark:border-[#0a0a0f] items-center justify-center">
             {uploadingAvatar ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
@@ -231,8 +233,8 @@ export default function ProfileScreen() {
         </TouchableOpacity>
         <Text className="text-xl font-bold text-[#0F1018] dark:text-white">{displayName.trim()}</Text>
         <Text className="text-sm text-[#6B7280] dark:text-[#9090a8] mt-1">{user?.email}</Text>
-        <View className="bg-[#6c5ce7]/20 px-3 py-1 rounded-full mt-2">
-          <Text className="text-[#6c5ce7] text-xs font-medium capitalize">
+        <View className="bg-accent/20 px-3 py-1 rounded-full mt-2">
+          <Text className="text-accent text-xs font-medium capitalize">
             {user?.role || "user"}
           </Text>
         </View>
@@ -247,7 +249,7 @@ export default function ProfileScreen() {
       </View>
 
       <TouchableOpacity
-        className="bg-[#6c5ce7] rounded-2xl py-4 items-center mb-3"
+        className="bg-accent rounded-2xl py-4 items-center mb-3"
         onPress={() => setEditing(true)}
         activeOpacity={0.8}
       >
@@ -259,7 +261,7 @@ export default function ProfileScreen() {
         onPress={() => router.push("/change-password")}
         activeOpacity={0.8}
       >
-        <Ionicons name="lock-closed-outline" size={18} color="#6c5ce7" />
+        <Ionicons name="lock-closed-outline" size={18} color={palette.accent} />
         <Text className="text-[#0F1018] dark:text-white font-semibold text-base ml-2">Change Password</Text>
       </TouchableOpacity>
 

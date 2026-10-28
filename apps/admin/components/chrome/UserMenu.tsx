@@ -63,7 +63,7 @@ export function UserMenu() {
               User Activity
             </Link>
             <Link
-              href="/profile"
+              href="/account"
               onClick={() => setOpen(false)}
               className="flex items-center gap-3 px-4 py-2.5 text-text-secondary hover:bg-bg-hover hover:text-foreground"
             >
@@ -71,7 +71,7 @@ export function UserMenu() {
               Profile
             </Link>
             <Link
-              href="/account/security"
+              href="/account#security"
               onClick={() => setOpen(false)}
               className="flex items-center gap-3 px-4 py-2.5 text-text-secondary hover:bg-bg-hover hover:text-foreground"
             >

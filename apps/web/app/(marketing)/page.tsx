@@ -1,10 +1,12 @@
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Database, LayoutDashboard, Zap } from "lucide-react";
 import Link from "next/link";
 // grit:home:blog-import
 import { getPublishedBlogs } from "@/lib/blog-api";
 import { DevLinks } from "@/components/dev-links";
 
-const DOCS_URL = "https://gritframework.dev/docs";
+// Where the admin panel is. A triple project runs it on its own port; a double
+// has it as a route group in this app. NEXT_PUBLIC_ADMIN_URL overrides both.
+const ADMIN_URL = process.env.NEXT_PUBLIC_ADMIN_URL || "http://localhost:3001";
 
 // Rendered on the server and refreshed every minute, so the first paint, and
 // what a crawler reads, already holds the latest posts.
@@ -22,52 +24,83 @@ export default async function HomePage() {
         <div className="mx-auto max-w-2xl px-6 py-24 text-center">
           <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-border bg-bg-secondary px-4 py-1.5 text-sm text-text-secondary">
             <span className="h-2 w-2 rounded-full bg-success animate-pulse" />
-            <span>Go + React Full-Stack Framework</span>
+            <span>Web, phone and desktop, on one Go API</span>
           </div>
 
           <h1 className="text-5xl font-bold tracking-tight sm:text-6xl lg:text-7xl">
-            <span className="text-accent">Grit</span>
+            <span className="text-foreground">Messages that</span>{" "}
+            <span className="text-accent">arrive</span>
           </h1>
 
           <p className="mt-6 text-lg text-text-secondary leading-relaxed max-w-lg mx-auto">
-            The full-stack meta-framework that fuses Go, React, and a
-            Filament-like admin panel. Scaffold entire projects, generate
-            resources, and ship fast.
+            Direct and group chats with live delivery, typing indicators, read
+            receipts, unread counts and photos. Open it in two browsers and watch
+            a message land in both.
           </p>
 
           <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-            <a
-              href={`${DOCS_URL}/getting-started/quick-start`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
+            <Link
+              href="/register"
+              className="flex items-center gap-2 rounded-lg bg-accent px-6 py-3 text-sm font-semibold text-accent-fg hover:bg-accent-hover transition-colors"
             >
-              Get Started <ArrowRight className="h-4 w-4" />
-            </a>
+              Start chatting <ArrowRight className="h-4 w-4" />
+            </Link>
             <a
-              href={`${DOCS_URL}`}
-              target="_blank"
-              rel="noopener noreferrer"
+              href={ADMIN_URL}
               className="flex items-center gap-2 rounded-lg border border-border bg-bg-secondary px-6 py-3 text-sm font-semibold text-foreground hover:bg-bg-hover transition-colors"
             >
-              Read the Docs
+              Open the admin panel
             </a>
           </div>
 
-          {/* Terminal snippet */}
-          <div className="mt-16 mx-auto max-w-md rounded-xl border border-border bg-bg-secondary shadow-2xl overflow-hidden text-left">
-            <div className="flex items-center gap-2 border-b border-border px-4 py-2.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-danger/60" />
-              <div className="h-2.5 w-2.5 rounded-full bg-warning/60" />
-              <div className="h-2.5 w-2.5 rounded-full bg-success/60" />
-              <span className="ml-2 text-[11px] text-text-muted font-mono">terminal</span>
-            </div>
-            <div className="p-5 font-mono text-sm space-y-1.5">
-              <p><span className="text-success select-none">$ </span><span className="text-foreground">grit new my-saas</span></p>
-              <p><span className="text-success select-none">$ </span><span className="text-foreground">cd my-saas && docker compose up -d</span></p>
-              <p><span className="text-success select-none">$ </span><span className="text-foreground">pnpm dev</span></p>
-              <p className="text-success pt-1">Ready on http://localhost:3000</p>
-            </div>
+          {/* grit:home:blog-cta-start */}
+          <p className="mt-6 text-sm text-text-secondary">
+            <Link href="/blog" className="hover:text-accent transition-colors">
+              Read the blog
+            </Link>
+          </p>
+          {/* grit:home:blog-cta-end */}
+        </div>
+      </section>
+
+      {/* What this project already has. Edit or delete this section: it is here
+          so a fresh project is not a blank page, not because it has to be. */}
+      <section className="border-t border-border/50">
+        <div className="mx-auto max-w-5xl px-6 py-20">
+          <h2 className="text-2xl font-bold tracking-tight text-center">
+            What{"'"}s included
+          </h2>
+          <div className="mt-10 grid gap-6 sm:grid-cols-3">
+            {[
+              {
+                icon: Database,
+                title: "Go API",
+                desc: "Gin and GORM, with JWT auth, roles, file uploads and background jobs.",
+              },
+              {
+                icon: Zap,
+                title: "Next.js frontend",
+                desc: "App Router, React Query and Tailwind, sharing types with the API.",
+              },
+              {
+                icon: LayoutDashboard,
+                title: "Admin panel",
+                desc: "A resource-driven dashboard: tables, forms, filters and exports.",
+              },
+            ].map((f) => (
+              <div
+                key={f.title}
+                className="rounded-xl border border-border bg-bg-elevated p-6 text-left"
+              >
+                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent/15 border border-accent/20">
+                  <f.icon className="h-4.5 w-4.5 text-accent" />
+                </div>
+                <h3 className="mt-4 font-semibold text-foreground">{f.title}</h3>
+                <p className="mt-1.5 text-sm text-text-secondary leading-relaxed">
+                  {f.desc}
+                </p>
+              </div>
+            ))}
           </div>
         </div>
       </section>

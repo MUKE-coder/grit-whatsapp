@@ -1,6 +1,8 @@
 package paginate
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,6 +37,77 @@ func newDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate: %v", err)
 	}
 	return db
+}
+
+// A page-numbered list repeated rows and skipped others once the table was
+// big enough.
+//
+// The page query sorted by the requested column and stopped there, so rows
+// sharing a value had no defined order and the database was free to return
+// them differently for each query. Postgres does exactly that as soon as it
+// plans a parallel external sort: the order of tied rows depends on which
+// worker finished first. Measured on 500,000 rows with repeating names, the
+// same row came back on two pages while another never appeared, with no error
+// anywhere (grit#112).
+//
+// Asserted on the SQL rather than on the rows, deliberately. SQLite returns
+// ties in insertion order, so a test that walks the pages passes whether or
+// not the tiebreaker is there, and would have gone on passing through the
+// whole of this bug.
+func TestPagesBreakTiesOnID(t *testing.T) {
+	db := newDB(t)
+	seed(t, db, 3)
+
+	var orders []string
+	if err := db.Callback().Query().After("gorm:query").Register("test:order", func(tx *gorm.DB) {
+		sql := tx.Statement.SQL.String()
+		if strings.Contains(sql, "LIMIT") && strings.Contains(sql, "ORDER BY") {
+			orders = append(orders, sql[strings.Index(sql, "ORDER BY"):])
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	cfg := Config{Sortable: map[string]bool{"rank": true}}
+	if _, err := List[widget](db.Model(&widget{}), Params{
+		Page: 2, PageSize: 1, SortBy: "rank", SortOrder: "asc",
+	}, cfg); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	if len(orders) != 1 {
+		t.Fatalf("expected one page query, saw %d: %q", len(orders), orders)
+	}
+	if !strings.HasPrefix(orders[0], "ORDER BY rank asc,id asc") {
+		t.Errorf("page query ordered %q, want rank then id: without the second\n"+
+			"column, tied rows have no defined order and pages repeat and skip", orders[0])
+	}
+}
+
+// And sorting by id does not ask for it twice.
+func TestSortingByIDDoesNotRepeatTheTiebreaker(t *testing.T) {
+	db := newDB(t)
+	seed(t, db, 3)
+
+	var orders []string
+	if err := db.Callback().Query().After("gorm:query").Register("test:order:id", func(tx *gorm.DB) {
+		sql := tx.Statement.SQL.String()
+		if strings.Contains(sql, "LIMIT") && strings.Contains(sql, "ORDER BY") {
+			orders = append(orders, sql[strings.Index(sql, "ORDER BY"):])
+		}
+	}); err != nil {
+		t.Fatalf("register callback: %v", err)
+	}
+
+	cfg := Config{Sortable: map[string]bool{"id": true}}
+	if _, err := List[widget](db.Model(&widget{}), Params{
+		Page: 1, PageSize: 1, SortBy: "id", SortOrder: "asc",
+	}, cfg); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(orders) == 1 && strings.Contains(orders[0], "id asc,id asc") {
+		t.Errorf("ordered %q: id is already unique", orders[0])
+	}
 }
 
 // seed inserts n rows with distinct, increasing created_at values.
@@ -267,5 +340,216 @@ func TestTypedCursorValue(t *testing.T) {
 	}
 	if got := typedCursorValue("draft"); got != "draft" {
 		t.Errorf("string: got %v, want draft", got)
+	}
+}
+
+// ── The deferred join ────────────────────────────────────────────────────
+//
+// Past deepPageOffset, List fetches a page in two queries: the primary keys
+// from the index, then the rows by key. It is an optimisation, so the only
+// thing that matters is that nobody can tell. These drive List across the
+// boundary on a table big enough to cross it, with ties on the sort column
+// (where an unstable order shows up as a repeated or missing row) and with a
+// preload (which the key query has to skip and the row query has to run).
+//
+// The preload test is not hypothetical: the first implementation shared the
+// caller's Statement, so clearing preloads for the key query cleared them for
+// the row query too and every association came back empty. This caught it.
+
+type djAuthor struct {
+	ID   uint `gorm:"primarykey"`
+	Name string
+}
+
+type djPost struct {
+	ID       uint   `gorm:"primarykey"`
+	Title    string `gorm:"index"`
+	AuthorID uint
+	Author   djAuthor
+}
+
+const (
+	djRows     = 3000 // comfortably past deepPageOffset
+	djPageSize = 25
+)
+
+func newDeferredJoinDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("db handle: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(&djAuthor{}, &djPost{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	authors := []djAuthor{{Name: "Ada"}, {Name: "Grace"}, {Name: "Alan"}}
+	if err := db.Create(&authors).Error; err != nil {
+		t.Fatalf("authors: %v", err)
+	}
+
+	// Titles repeat every 10 rows on purpose: 300 groups of ties.
+	posts := make([]djPost, 0, djRows)
+	for i := 0; i < djRows; i++ {
+		posts = append(posts, djPost{
+			Title:    fmt.Sprintf("title-%04d", i/10),
+			AuthorID: authors[i%len(authors)].ID,
+		})
+	}
+	if err := db.CreateInBatches(&posts, 500).Error; err != nil {
+		t.Fatalf("posts: %v", err)
+	}
+	return db
+}
+
+func djConfig() Config {
+	return Config{
+		Sortable:    map[string]bool{"title": true, "id": true},
+		DefaultSort: "id",
+	}
+}
+
+func djIDs(rows []djPost) []uint {
+	out := make([]uint, len(rows))
+	for i, r := range rows {
+		out[i] = r.ID
+	}
+	return out
+}
+
+// TestDeepPageMatchesPlainOffset: the optimisation returns the same page.
+func TestDeepPageMatchesPlainOffset(t *testing.T) {
+	db := newDeferredJoinDB(t)
+
+	for _, sort := range []struct{ by, order string }{
+		{"title", "asc"},
+		{"title", "desc"},
+		{"id", "asc"},
+	} {
+		for _, page := range []int{1, 40, 41, 80, 120} {
+			offset := (page - 1) * djPageSize
+
+			got, err := List[djPost](db.Model(&djPost{}), Params{
+				Page: page, PageSize: djPageSize, SortBy: sort.by, SortOrder: sort.order,
+			}, djConfig())
+			if err != nil {
+				t.Fatalf("List page %d: %v", page, err)
+			}
+
+			var want []djPost
+			if err := orderStably(db.Model(&djPost{}), sort.by, sort.order).
+				Offset(offset).Limit(djPageSize).Find(&want).Error; err != nil {
+				t.Fatalf("plain offset: %v", err)
+			}
+
+			gotIDs, wantIDs := djIDs(got.Data), djIDs(want)
+			if len(gotIDs) != len(wantIDs) {
+				t.Fatalf("sort=%s %s page %d: got %d rows, plain OFFSET gives %d",
+					sort.by, sort.order, page, len(gotIDs), len(wantIDs))
+			}
+			for i := range gotIDs {
+				if gotIDs[i] != wantIDs[i] {
+					t.Fatalf("sort=%s %s page %d: row %d is id %d, plain OFFSET gives id %d",
+						sort.by, sort.order, page, i, gotIDs[i], wantIDs[i])
+				}
+			}
+		}
+	}
+}
+
+// TestDeepPagesPartitionTheTable walks every page across the shallow/deep
+// boundary: each row exactly once, none missing, none twice.
+func TestDeepPagesPartitionTheTable(t *testing.T) {
+	db := newDeferredJoinDB(t)
+
+	seen := map[uint]int{}
+	for page := 1; page <= djRows/djPageSize; page++ {
+		res, err := List[djPost](db.Model(&djPost{}), Params{
+			Page: page, PageSize: djPageSize, SortBy: "title", SortOrder: "asc",
+		}, djConfig())
+		if err != nil {
+			t.Fatalf("page %d: %v", page, err)
+		}
+		for _, r := range res.Data {
+			seen[r.ID]++
+		}
+	}
+
+	if len(seen) != djRows {
+		t.Errorf("walked every page and saw %d distinct rows, want %d", len(seen), djRows)
+	}
+	for id, n := range seen {
+		if n != 1 {
+			t.Errorf("row %d appeared %d times across the pages", id, n)
+		}
+	}
+}
+
+// TestPreloadsRunOnADeepPage: the key query drops preloads, the row query
+// has to still run them.
+func TestPreloadsRunOnADeepPage(t *testing.T) {
+	db := newDeferredJoinDB(t)
+
+	res, err := List[djPost](db.Model(&djPost{}).Preload("Author"), Params{
+		Page: 80, PageSize: djPageSize, SortBy: "title", SortOrder: "asc",
+	}, djConfig())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Data) == 0 {
+		t.Fatal("deep page is empty")
+	}
+	for _, r := range res.Data {
+		if r.Author.ID == 0 || r.Author.Name == "" {
+			t.Fatalf("row %d came back with no Author: the deferred join dropped "+
+				"the preload instead of running it on the row query", r.ID)
+		}
+	}
+}
+
+// TestDeepPageFiltersApplyToBothQueries: the caller's WHERE has to reach
+// both, or a deep page returns rows the filter excluded.
+func TestDeepPageFiltersApplyToBothQueries(t *testing.T) {
+	db := newDeferredJoinDB(t)
+
+	res, err := List[djPost](db.Model(&djPost{}).Where("id % 2 = 0"), Params{
+		Page: 50, PageSize: djPageSize, SortBy: "id", SortOrder: "asc",
+	}, djConfig())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(res.Data) == 0 {
+		t.Fatal("deep filtered page is empty")
+	}
+	for _, r := range res.Data {
+		if r.ID%2 != 0 {
+			t.Fatalf("row %d is not in the filtered set: the deferred join lost "+
+				"the caller's WHERE on one of its two queries", r.ID)
+		}
+	}
+}
+
+// TestDeepPagePastTheEndIsEmpty: no error, and no WHERE id IN ().
+func TestDeepPagePastTheEndIsEmpty(t *testing.T) {
+	db := newDeferredJoinDB(t)
+
+	res, err := List[djPost](db.Model(&djPost{}), Params{
+		Page: 9999, PageSize: djPageSize, SortBy: "title", SortOrder: "asc",
+	}, djConfig())
+	if err != nil {
+		t.Fatalf("a page past the end errored: %v", err)
+	}
+	if len(res.Data) != 0 {
+		t.Errorf("a page past the end returned %d rows", len(res.Data))
+	}
+	if res.Meta.Total != djRows {
+		t.Errorf("total is %d, want %d", res.Meta.Total, djRows)
 	}
 }

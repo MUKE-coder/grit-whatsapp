@@ -26,7 +26,7 @@ export function CheckboxField({ field, value, onChange, error }: CheckboxFieldPr
         <span
           className={
             "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border " +
-            (value ? "border-accent bg-accent text-white" : "border-border")
+            (value ? "border-accent bg-accent text-accent-fg" : "border-border")
           }
         >
           {value && <Check className="h-3.5 w-3.5" />}

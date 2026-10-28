@@ -10,7 +10,15 @@ import { Platform } from "react-native";
 //      can't reach "localhost"/"10.0.2.2" — those point at the device
 //      itself — but it CAN reach whatever IP Metro is served on.
 //   3. Fall back to the platform loopback for web / edge cases.
-const API_PORT = 8080;
+// The port the API listens on, to go with the LAN host derived below.
+//
+// It was the literal 8080, so moving APP_PORT left the phone calling a port
+// nothing answers on all three paths here, with EXPO_PUBLIC_API_URL the only
+// escape and nothing setting it. grit seed writes EXPO_PUBLIC_API_PORT into
+// apps/expo/.env.local, so the port moves with the project and the LAN
+// derivation keeps working, which an absolute localhost URL would break: on a
+// real device, localhost is the device.
+const API_PORT = process.env.EXPO_PUBLIC_API_PORT || "8080";
 
 function resolveApiUrl(): string {
   const explicit = process.env.EXPO_PUBLIC_API_URL;

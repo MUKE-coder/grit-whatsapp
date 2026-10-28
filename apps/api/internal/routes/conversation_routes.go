@@ -28,8 +28,10 @@ func init() {
 		m.Staff.GET("/conversations/:id", middleware.RequireRole("ADMIN", "perm:conversations.view"), h.GetByID)
 		m.Staff.GET("/conversations/:id/pdf", middleware.RequireRole("ADMIN", "perm:conversations.view"), h.PDF)
 		m.Staff.POST("/conversations", middleware.RequireRole("ADMIN", "perm:conversations.create"), h.Create)
+		m.Staff.POST("/conversations/bulk-create", middleware.RequireRole("ADMIN", "perm:conversations.create"), h.BulkCreate)
 		m.Staff.PUT("/conversations/:id", middleware.RequireRole("ADMIN", "perm:conversations.edit"), h.Update)
 		m.Staff.PATCH("/conversations/:id", middleware.RequireRole("ADMIN", "perm:conversations.edit"), h.Patch)
+		m.Staff.POST("/conversations/bulk-edit", middleware.RequireRole("ADMIN", "perm:conversations.edit"), h.BulkEdit)
 
 		m.Staff.DELETE("/conversations/:id", middleware.RequireRole("ADMIN", "perm:conversations.delete"), h.Delete)
 		m.Staff.POST("/conversations/bulk", middleware.RequireRole("ADMIN", "perm:conversations.delete"), h.Bulk)

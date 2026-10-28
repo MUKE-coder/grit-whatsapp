@@ -26,6 +26,9 @@ function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   // Set when the password was right and the account owes a 2FA code.
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  // "app" or "email": which second factor this account uses, as the
+  // sign-in response reported it.
+  const [factorMethod, setFactorMethod] = useState("app");
   const [code, setCode] = useState("");
   const [useBackup, setUseBackup] = useState(false);
   const [trustDevice, setTrustDevice] = useState(false);
@@ -37,9 +40,12 @@ function LoginPage() {
   const onSubmit = (data: LoginInput) => {
     login(data, {
       onSuccess: (res) => {
-        const d = res as { totp_required?: boolean; pending_token?: string };
+        const d = res as { totp_required?: boolean; pending_token?: string; method?: string };
         if (d?.totp_required && d.pending_token) {
           setPendingToken(d.pending_token);
+          // Which factor this account uses. Empty means an authenticator: that
+          // is what every account meant before codes by email existed.
+          setFactorMethod(d.method ?? "app");
           return;
         }
         navigate({ to: "/app" });
@@ -67,7 +73,9 @@ function LoginPage() {
         subtitle={
           useBackup
             ? "Enter one of your backup codes"
-            : "Enter the 6-digit code from your authenticator app"
+            : factorMethod === "email"
+              ? "We emailed you a 6-digit code. It expires in a few minutes."
+              : "Enter the 6-digit code from your authenticator app"
         }
         errorMessage={
           verifyError ? ((verifyError as Error).message || "That code was not accepted") : undefined

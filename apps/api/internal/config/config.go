@@ -13,6 +13,8 @@ import (
 	"github.com/joho/godotenv"
 
 	"whatsapp/apps/api/internal/crypto"
+
+	"net"
 )
 
 // StorageConfig holds credentials for a single S3-compatible provider.
@@ -215,6 +217,18 @@ type Config struct {
 	PulseStorage    string // "memory" (default) | "sqlite"
 	PulseStorageDSN string // path for sqlite, e.g. "pulse.db" or ":memory:"
 
+	// The config half of Pulse's two-gate profiling switch. Pulse also needs
+	// PULSE_PROFILE_ENABLED set in the environment before it will sample, so
+	// one forgotten setting cannot expose the shape of your code.
+	PulseProfiling bool
+	// Mutex and block profiling cost the runtime something while on, so both
+	// stay off until a number is given. Zero means off.
+	PulseMutexProfileFraction int
+	PulseBlockProfileRate     int
+	// Ask the database to explain a slow SELECT. Off by default: it issues
+	// extra read-only queries against your database.
+	PulseExplainSlowQueries bool
+
 	// OAuth2 Social Login
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -224,6 +238,22 @@ type Config struct {
 
 	// Serve the API reference at /docs in production (API_DOCS_PUBLIC).
 	APIDocsPublic bool
+	// The scheduled sweep. Sentinel's own AutoBlock catches a burst, ten
+	// high-severity threats inside ten minutes; this catches the scanner
+	// patient enough to stay under that. An address over
+	// SecurityAutoBanMinThreats high-severity threats inside
+	// SecurityAutoBanWindow is banned, every SecurityAutoBanEvery.
+	SecurityAutoBanEnabled    bool
+	SecurityAutoBanMinThreats int
+	SecurityAutoBanWindow     time.Duration
+	SecurityAutoBanEvery      time.Duration
+	SecurityAutoBanPermanent  bool
+	// Addresses or CIDRs the sign-in lockout and auto-block never bar,
+	// whatever they do: your own monitoring, a partner's integration, an
+	// office range. Auto-block falls back to the lockout list when its own
+	// is empty, because both answer the same question.
+	SentinelLockoutExemptIPs   []string
+	SentinelAutoBlockExemptIPs []string
 }
 
 // Load reads configuration from environment variables.
@@ -239,7 +269,7 @@ func Load() (*Config, error) {
 		// Production unless told otherwise: a server that forgot APP_ENV is strict.
 		AppEnv:             getEnv("APP_ENV", "production"),
 		Port:               getEnv("APP_PORT", "8080"),
-		AppURL:             getEnv("APP_URL", "http://localhost:8080"),
+		AppURL:             resolveAppURL(firstNonEmpty(os.Getenv("PORT"), os.Getenv("APP_PORT"), "8080")),
 		DatabaseURL:        resolveDatabaseURL(),
 		JWTSecret:          getEnv("JWT_SECRET", ""),
 		FieldEncryptionKey: getEnv("FIELD_ENCRYPTION_KEY", ""),
@@ -309,13 +339,25 @@ func Load() (*Config, error) {
 		PulseUsername:   getEnv("PULSE_USERNAME", "admin"),
 		PulsePassword:   getEnv("PULSE_PASSWORD", "pulse"),
 		PulseStorage:    getEnv("PULSE_STORAGE", "memory"),
-		PulseStorageDSN: getEnv("PULSE_STORAGE_DSN", "pulse.db"),
+		PulseStorageDSN: resolveSQLitePath(getEnv("PULSE_STORAGE_DSN", "pulse.db")),
 
-		GoogleClientID:     getEnv("GOOGLE_CLIENT_ID", ""),
-		GoogleClientSecret: getEnv("GOOGLE_CLIENT_SECRET", ""),
-		GithubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
-		GithubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
-		OAuthFrontendURL:   getEnv("OAUTH_FRONTEND_URL", "http://localhost:3001"),
+		PulseProfiling:            getEnv("PULSE_PROFILING", "false") == "true",
+		PulseMutexProfileFraction: getEnvInt("PULSE_MUTEX_PROFILE_FRACTION", 0),
+		PulseBlockProfileRate:     getEnvInt("PULSE_BLOCK_PROFILE_RATE", 0),
+		PulseExplainSlowQueries:   getEnv("PULSE_EXPLAIN_SLOW_QUERIES", "false") == "true",
+
+		GoogleClientID:             getEnv("GOOGLE_CLIENT_ID", ""),
+		GoogleClientSecret:         getEnv("GOOGLE_CLIENT_SECRET", ""),
+		GithubClientID:             getEnv("GITHUB_CLIENT_ID", ""),
+		GithubClientSecret:         getEnv("GITHUB_CLIENT_SECRET", ""),
+		OAuthFrontendURL:           getEnv("OAUTH_FRONTEND_URL", "http://localhost:3001"),
+		SecurityAutoBanEnabled:     getEnv("SECURITY_AUTO_BAN", "true") == "true",
+		SecurityAutoBanMinThreats:  getEnvInt("SECURITY_AUTO_BAN_MIN_THREATS", 3),
+		SecurityAutoBanWindow:      getEnvDuration("SECURITY_AUTO_BAN_WINDOW_HOURS", 24, time.Hour),
+		SecurityAutoBanEvery:       getEnvDuration("AUTO_BAN_INTERVAL_HOURS", 6, time.Hour),
+		SecurityAutoBanPermanent:   getEnv("SECURITY_AUTO_BAN_PERMANENT", "true") == "true",
+		SentinelLockoutExemptIPs:   splitCSV(getEnv("SENTINEL_LOCKOUT_EXEMPT_IPS", "")),
+		SentinelAutoBlockExemptIPs: splitCSV(getEnv("SENTINEL_AUTOBLOCK_EXEMPT_IPS", "")),
 	}
 
 	// The local driver keeps files on this server's disk: a second replica cannot
@@ -522,6 +564,72 @@ func warnPortMismatch(urlVar, raw, portVar string) {
 	}
 }
 
+// envDir is the directory holding the .env this process loaded, or "" when there
+// is none. A relative path in that file is relative to it, not to wherever the
+// process happens to have been started.
+var envDir string
+
+// loadDotEnv reads the project's .env from wherever the binary is.
+//
+// godotenv does not overwrite a variable that is already set, so the nearest
+// file wins and the environment wins over all of them.
+func loadDotEnv() {
+	for _, candidate := range []string{".env", "../.env", "../../.env"} {
+		if _, err := os.Stat(candidate); err != nil {
+			continue
+		}
+		_ = godotenv.Load(candidate)
+		if envDir == "" {
+			envDir = filepath.Dir(candidate)
+		}
+	}
+}
+
+// resolveSQLitePath anchors a relative database file to the project.
+//
+// The CLI runs migrate and seed from the API module and the server may run from
+// anywhere, so a path resolved against the working directory is two different
+// files. The second one is created empty, which is the part that hurts: the
+// server starts, finds no tables, and returns a 500 for every read while the
+// data sits in the first.
+//
+// A URI form (file:...) and an absolute path are left alone: both already say
+// exactly which file they mean.
+func resolveSQLitePath(path string) string {
+	return ResolveSQLitePath(path)
+}
+
+// ResolveSQLitePath is resolveSQLitePath, for the other things in this app that
+// keep a SQLite file of their own: Sentinel's threat log and Pulse's traces.
+func ResolveSQLitePath(path string) string {
+	if path == "" || envDir == "" || filepath.IsAbs(path) || strings.HasPrefix(path, "file:") {
+		return path
+	}
+	anchored := filepath.Join(envDir, path)
+	if _, err := os.Stat(anchored); err == nil {
+		return anchored
+	}
+	// A project created before this rule has its database where the old one put
+	// it: beside whichever directory the CLI ran migrate from, which is the API
+	// module. An existing file wins over starting an empty one beside .env,
+	// because an empty database that looks exactly like the real one is the
+	// whole failure this is about.
+	for _, legacy := range []string{
+		path,
+		filepath.Join(envDir, "apps", "api", path),
+		filepath.Join(envDir, "api", path),
+	} {
+		if _, err := os.Stat(legacy); err != nil {
+			continue
+		}
+		if abs, err := filepath.Abs(legacy); err == nil {
+			log.Printf("sqlite: using %s, the database this project already has. Move it beside .env to have every command agree on it wherever they run from.", abs)
+		}
+		return legacy
+	}
+	return anchored
+}
+
 // resolveDatabaseURL builds the DSN from DB_PROVIDER and that provider's parts.
 //
 // DATABASE_URL still wins: it is the escape hatch for a managed database whose
@@ -563,7 +671,7 @@ func resolveDatabaseURL() string {
 		return fmt.Sprintf("mysql:%s:%s@tcp(%s:%s)/%s", user, pass, host, port, db)
 
 	case "sqlite", "sqlite3", "file":
-		return "sqlite:" + getEnv("SQLITE_PATH", "./app.db")
+		return "sqlite:" + resolveSQLitePath(getEnv("SQLITE_PATH", "./app.db"))
 
 	case "memory", ":memory:":
 		// Shared cache, not a bare :memory:. GORM pools connections, and a bare
@@ -576,6 +684,35 @@ func resolveDatabaseURL() string {
 		log.Fatalf("DB_PROVIDER=%q is not one this app knows. Use postgres, mysql, sqlite or memory, or set DATABASE_URL directly.", provider)
 		return ""
 	}
+}
+
+// resolveAppURL reads APP_URL and says so when it names a different port from
+// the one the server is about to listen on.
+//
+// APP_URL is where the outside world reaches this app, so behind a proxy it is
+// https://shop.example.com while the server listens on 8080, and that is
+// correct. On localhost it is not: a local APP_URL whose port disagrees with
+// APP_PORT is always a mistake, and a silent one. Every URL built from it is
+// wrong, which with STORAGE_DRIVER=local means every uploaded file's URL points
+// at a port where nothing is listening, and the symptom is an image that does
+// not load rather than anything that mentions APP_URL.
+func resolveAppURL(port string) string {
+	appURL := getEnv("APP_URL", "http://localhost:8080")
+	u, err := url.Parse(appURL)
+	if err != nil || u.Host == "" {
+		return appURL
+	}
+	host, urlPort, err := net.SplitHostPort(u.Host)
+	if err != nil || urlPort == port {
+		return appURL
+	}
+	if host != "localhost" && host != "127.0.0.1" && host != "[::1]" {
+		// A real hostname: a proxy in front, which is the normal case.
+		return appURL
+	}
+	log.Printf("WARNING: APP_URL is %s but this server listens on port %s. Every URL the app builds, uploaded files included, will point at port %s where nothing is answering. Set APP_URL=http://%s:%s",
+		appURL, port, urlPort, host, port)
+	return appURL
 }
 
 // warnProviderMismatch says so when DATABASE_URL names a different engine from
@@ -608,17 +745,59 @@ func warnProviderMismatch(provider, dsn string) {
 
 // resolveStorageDriver picks the storage driver from STORAGE_DRIVER.
 //
-// Outside production, minio with no MINIO_ACCESS_KEY becomes local, so a new
+// Outside production, minio that is not answering becomes local, so a new
 // project stores uploads before Docker is running instead of answering each
 // one with STORAGE_UNAVAILABLE. Production never falls back: a server that
-// lost its credentials should say so, not start writing to its own disk.
+// lost its bucket should say so, not start writing to a disk that is not
+// backed up and that the next container will not have.
+//
+// This used to test for a missing MINIO_ACCESS_KEY, and grit writes that key
+// into .env, so the condition could never be true and the fallback never
+// fired. Every new project on a machine without Docker answered every upload
+// with "File storage is not configured" until somebody found STORAGE_DRIVER
+// for themselves. Whether the key is set was never the question; whether
+// MinIO answers is.
 func resolveStorageDriver() string {
 	driver := getEnv("STORAGE_DRIVER", "minio")
-	if driver == "minio" && getEnv("MINIO_ACCESS_KEY", "") == "" && getEnv("APP_ENV", "production") != "production" {
+	if driver != "minio" || getEnv("APP_ENV", "production") == "production" {
+		return driver
+	}
+	if getEnv("MINIO_ACCESS_KEY", "") == "" {
 		log.Println("MinIO has no credentials (MINIO_ACCESS_KEY), so files are kept on the local disk. Set STORAGE_DRIVER=local to make that the choice, or set the MinIO credentials to use MinIO")
 		return "local"
 	}
-	return driver
+	// resolveMinioEndpoint, not a literal: MINIO_PORT moves per project so
+	// that several can run at once, and probing 9000 reported MinIO as
+	// down while it was answering on 9002. Every new project then stored
+	// uploads on local disk in development without anyone choosing that.
+	endpoint := resolveMinioEndpoint()
+	if minioAnswers(endpoint) {
+		return driver
+	}
+	log.Printf("MinIO at %s is not answering, so files are being kept on the local disk at %s and uploads work. Start it with docker compose up -d minio, or set STORAGE_DRIVER=local to choose the disk deliberately.", endpoint, getEnv("STORAGE_LOCAL_ROOT", "storage/app"))
+	return "local"
+}
+
+// minioAnswers reports whether something is listening on the endpoint.
+//
+// A TCP dial, not a bucket call: this runs while the config is being read,
+// before there is a client to ask, and the question is only whether the
+// container is up. 300ms because the answer is immediate either way on a
+// local machine, and a slow boot would be worse than one wrong guess.
+func minioAnswers(endpoint string) bool {
+	host := endpoint
+	if u, err := url.Parse(endpoint); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	if !strings.Contains(host, ":") {
+		host += ":80"
+	}
+	conn, err := net.DialTimeout("tcp", host, 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 // StorageDisk is one named disk from STORAGE_DISKS.

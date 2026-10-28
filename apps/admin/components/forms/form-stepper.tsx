@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useForm, useWatch, type UseFormTrigger, type FieldValues } from "react-hook-form";
 import type { FieldDefinition, FormDefinition } from "@/lib/resource";
 import { writableValues } from "@/lib/form-values";
-import { FieldRenderer, buildDefaults } from "./form-builder";
+import { FieldRenderer, buildDefaults, useConditionalFields } from "./form-builder";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Check, ChevronLeft, ChevronRight, Loader2 } from "@/lib/icons";
 
@@ -172,6 +172,17 @@ export function FormStepper({
 
   const handleFinalSubmit = handleSubmit((data) => onSubmit(writableValues(formDef.fields, data)));
 
+  // Conditions are resolved over the whole form, not per step: a field on
+  // step three can depend on an answer given on step one.
+  const conditionallyVisible = useConditionalFields(
+    steps.flatMap((s) => s.fields),
+    control,
+  );
+  const visibleIn = (fields: FieldDefinition[]) => {
+    const live = new Map(conditionallyVisible.map((f) => [f.key, f] as const));
+    return fields.filter((f) => live.has(f.key)).map((f) => live.get(f.key) as FieldDefinition);
+  };
+
   return (
     <div className={isVertical ? "flex gap-8" : "space-y-6"}>
       {/* Step Indicator */}
@@ -193,7 +204,7 @@ export function FormStepper({
                 <p className="text-sm text-text-secondary mb-4">{step.description}</p>
               )}
               <div className={`grid gap-4 ${isTwoColumn ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}>
-                {step.fields.map((field) => (
+                {visibleIn(step.fields).map((field) => (
                   <div
                     key={field.key}
                     className={field.colSpan === 2 && isTwoColumn ? "sm:col-span-2" : ""}
@@ -338,7 +349,7 @@ function HorizontalIndicator({
                   ${state === "completed"
                     ? "bg-success text-white"
                     : state === "active"
-                    ? "bg-accent text-white ring-4 ring-accent/20"
+                    ? "bg-accent text-accent-fg ring-4 ring-accent/20"
                     : "bg-bg-hover text-text-muted border border-border group-hover:border-border/80"}
                 `}
               >
@@ -412,7 +423,7 @@ function VerticalIndicator({
                     ${state === "completed"
                       ? "bg-success text-white"
                       : state === "active"
-                      ? "bg-accent text-white ring-2 ring-accent/20"
+                      ? "bg-accent text-accent-fg ring-2 ring-accent/20"
                       : "bg-bg-hover text-text-muted border border-border"}
                   `}
                 >

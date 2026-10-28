@@ -6,6 +6,7 @@ import (
 	"hash/fnv"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -83,6 +84,11 @@ func captureAndStore(ctx context.Context, c *gin.Context, cacheService *cache.Ca
 	if writer.Status() != http.StatusOK || writer.body.Len() == 0 {
 		return nil
 	}
+	// And not if the response says one caller's copy must not be given to
+	// another.
+	if !shareableResponse(writer.Header()) {
+		return nil
+	}
 	resp := &cachedResponse{
 		Status:      http.StatusOK,
 		ContentType: writer.Header().Get("Content-Type"),
@@ -91,6 +97,49 @@ func captureAndStore(ctx context.Context, c *gin.Context, cacheService *cache.Ca
 	// A failed write only costs the next request a miss.
 	_ = cacheService.Client().Set(ctx, key, resp.encode(), ttl).Err()
 	return resp
+}
+
+// shareableResponse reports whether one caller's response may be served to
+// another.
+//
+// The cache key is the URL and nothing else. That is exactly right for a
+// catalogue, where every caller gets the same answer and one stored copy
+// serves all of them. It is exactly wrong for anything that varies by who
+// asked, and this middleware is mounted on the public group, where a cart, a
+// recently-viewed list or a per-key quota is a reasonable thing to add later.
+// Added there without this, the first shopper's cart is served to the second.
+//
+// The standard HTTP signals rather than a list of paths, so a handler opts out
+// by saying what it is and does not have to know this middleware exists.
+func shareableResponse(h http.Header) bool {
+	for _, directive := range strings.Split(h.Get("Cache-Control"), ",") {
+		switch strings.ToLower(strings.TrimSpace(directive)) {
+		case "private", "no-store", "no-cache":
+			return false
+		}
+	}
+
+	// A response that sets a cookie is establishing or refreshing something
+	// that identifies this caller, and replaying it hands that to the next one.
+	if len(h.Values("Set-Cookie")) > 0 {
+		return false
+	}
+
+	// Vary names what the response depends on. Anything the key does not
+	// include cannot be cached under it, and "*" means never.
+	for _, field := range strings.Split(h.Get("Vary"), ",") {
+		switch http.CanonicalHeaderKey(strings.TrimSpace(field)) {
+		case "":
+			// No Vary header at all.
+		case "Accept-Encoding":
+			// Compression happens after this, per response, so a stored body
+			// is the uncompressed one either way.
+		default:
+			return false
+		}
+	}
+
+	return true
 }
 
 func serveCachedResponse(c *gin.Context, cached *cachedResponse) {

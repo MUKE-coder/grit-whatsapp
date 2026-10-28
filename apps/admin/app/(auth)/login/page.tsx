@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff } from "@/lib/icons";
-import { useLogin, useMe, useVerifyTOTP } from "@/hooks/use-auth";
+import { Eye, EyeOff, Fingerprint } from "@/lib/icons";
+import { useLogin, useMe, usePasskeyLogin, useVerifyTOTP } from "@/hooks/use-auth";
+import { passkeysSupported } from "@/lib/webauthn";
+import { apiClient } from "@/lib/api-client";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { LoginSchema, type LoginInput } from "@repo/shared/schemas";
@@ -19,30 +21,98 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   // Holding a pending token means the password was right and 2FA is owed.
   const [pendingToken, setPendingToken] = useState<string | null>(null);
+  // "app" or "email": which second factor this account uses, as the
+  // sign-in response reported it.
+  const [factorMethod, setFactorMethod] = useState("app");
   const [code, setCode] = useState("");
   const [useBackup, setUseBackup] = useState(false);
+  // Asked of the browser, not of the server. Before anybody has identified
+  // themselves the server does not know whether this person has a passkey, and
+  // asking it would be an oracle for which addresses have accounts. The
+  // browser knows whether this device can produce one, which is the question
+  // that decides whether the button can do anything.
+  const [passkeyReady, setPasskeyReady] = useState(false);
+  const [passkeyError, setPasskeyError] = useState("");
   const [trustDevice, setTrustDevice] = useState(false);
+  // Signing in by link instead of by password.
+  const [linkState, setLinkState] = useState<"idle" | "sending" | "sent">("idle");
+  const [linkError, setLinkError] = useState("");
   const { mutate: login, isPending, error: serverError } = useLogin();
   const { mutate: verifyTOTP, isPending: verifying, error: verifyError } = useVerifyTOTP();
   const { data: existingUser, isLoading: meLoading } = useMe();
   const router = useRouter();
-  const { register, handleSubmit, formState: { errors } } = useForm<LoginInput>({
+  const { register, handleSubmit, getValues, formState: { errors } } = useForm<LoginInput>({
     resolver: zodResolver(LoginSchema),
   });
+
+  // The address already typed above is the one we send to. Asking for it a
+  // second time on a second screen is the step people abandon.
+  const sendMagicLink = async () => {
+    const email = (getValues("email") || "").trim();
+    if (!email.includes("@")) {
+      setLinkError("Type your email address above first.");
+      return;
+    }
+    setLinkError("");
+    setLinkState("sending");
+    try {
+      await apiClient.post("/api/auth/magic-link", { email });
+      setLinkState("sent");
+    } catch (err: unknown) {
+      setLinkState("idle");
+      setLinkError(
+        (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error?.message ??
+          "Could not send the link. Try your password instead.",
+      );
+    }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    passkeysSupported().then((ok) => {
+      if (!cancelled) setPasskeyReady(ok);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const { mutate: signInWithPasskey, isPending: passkeyPending } = usePasskeyLogin();
+
+  const onPasskey = () => {
+    setPasskeyError("");
+    signInWithPasskey(undefined, {
+      onError: (err: unknown) => {
+        // Closing the sheet or tapping Cancel is a NotAllowedError, and it is
+        // not a failure: telling somebody "passkey sign-in failed" because they
+        // changed their mind is how a button stops being trusted.
+        if ((err as { name?: string })?.name === "NotAllowedError") return;
+        setPasskeyError(
+          (err as { response?: { data?: { error?: { message?: string } } } })?.response?.data?.error
+            ?.message ?? "That passkey was not accepted. Use your password instead.",
+        );
+      },
+    });
+  };
 
   // v3.31.15: if the session cookie is still valid, don't show the
   // login form — bounce straight to the dashboard.
   useEffect(() => {
     if (!meLoading && existingUser) {
-      router.replace(existingUser.role === "USER" ? "/profile" : "/dashboard");
+      router.replace(existingUser.role === "USER" ? "/account" : "/dashboard");
     }
   }, [meLoading, existingUser, router]);
 
   const onSubmit = (data: LoginInput) =>
     login(data, {
       onSuccess: (res) => {
-        const d = res.data as { totp_required?: boolean; pending_token?: string };
-        if (d?.totp_required && d.pending_token) setPendingToken(d.pending_token);
+        const d = res.data as { totp_required?: boolean; pending_token?: string; method?: string };
+        if (d?.totp_required && d.pending_token) {
+          setPendingToken(d.pending_token);
+          // Which factor the account uses. Empty means an authenticator: that
+          // is what every account meant before codes by email existed.
+          setFactorMethod(d.method ?? "app");
+        }
       },
     });
 
@@ -73,7 +143,9 @@ export default function LoginPage() {
         subtitle={
           useBackup
             ? "Enter one of your backup codes"
-            : "Enter the 6-digit code from your authenticator app"
+            : factorMethod === "email"
+              ? "We emailed you a 6-digit code. It expires in a few minutes."
+              : "Enter the 6-digit code from your authenticator app"
         }
         errorMessage={verifyMessage}
       >
@@ -168,6 +240,7 @@ export default function LoginPage() {
             <input
               id="password"
               type={showPassword ? "text" : "password"}
+              autoComplete="current-password"
               {...register("password")}
               className={(errors.password ? inputErr : inputOk) + " pr-12"}
               placeholder="Enter your password"
@@ -203,6 +276,62 @@ export default function LoginPage() {
         >
           {isPending ? "Signing in..." : "Sign In"}
         </button>
+
+        {/* A password is a cognitive test, and WCAG 3.3.8 asks for a way past
+            one. A passkey is the better way past it than an emailed link: it
+            never leaves the device, there is nothing to phish, and it is one
+            touch. Shown whenever this browser can produce one, which is the
+            only question that can be answered before somebody says who they
+            are. */}
+        {passkeyReady && (
+          <>
+            <div className="flex items-center gap-3" aria-hidden="true">
+              <span className="h-px flex-1" style={{ background: "var(--auth-border)" }} />
+              <span className="text-xs" style={{ color: "var(--auth-muted)" }}>
+                or
+              </span>
+              <span className="h-px flex-1" style={{ background: "var(--auth-border)" }} />
+            </div>
+
+            <button
+              type="button"
+              onClick={onPasskey}
+              disabled={passkeyPending}
+              className="flex w-full items-center justify-center gap-2 rounded-[var(--auth-radius)] border py-3 font-medium transition-colors disabled:opacity-50"
+              style={{ borderColor: "var(--auth-border)", color: "var(--auth-text)" }}
+            >
+              <Fingerprint className="h-5 w-5" aria-hidden="true" />
+              {passkeyPending ? "Waiting for your passkey..." : "Sign in with a passkey"}
+            </button>
+
+            {passkeyError && (
+              <p role="alert" className="text-center text-sm text-red-500">
+                {passkeyError}
+              </p>
+            )}
+          </>
+        )}
+
+        {/* And the emailed link, for the people who never set a password
+            because they signed up with Google. */}
+        <div className="space-y-2 text-center text-sm">
+          {linkState === "sent" ? (
+            <p role="status" style={{ color: "var(--auth-muted)" }}>
+              If that address has an account, a sign-in link is on its way. It works once and expires in 15 minutes.
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={sendMagicLink}
+              disabled={linkState === "sending"}
+              className="underline disabled:opacity-50"
+              style={{ color: "var(--auth-primary)" }}
+            >
+              {linkState === "sending" ? "Sending a link..." : "Email me a sign-in link instead"}
+            </button>
+          )}
+          {linkError && <p className="text-red-500">{linkError}</p>}
+        </div>
       </form>
     </AuthShell>
   );

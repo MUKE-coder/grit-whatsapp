@@ -81,8 +81,11 @@ export function SelectField({ field, value, onChange, error }: SelectFieldProps)
       </label>
       <div className="relative">
         <button
+          id={fieldId}
           type="button"
           onClick={() => setOpen((o) => !o)}
+          aria-haspopup="listbox"
+          aria-expanded={open}
           className={`flex w-full items-center justify-between rounded-lg border border-border bg-bg-tertiary px-4 py-2.5 text-left text-sm text-foreground focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent ${error ? "border-danger" : ""}`}
         >
           <span className={selected ? "" : "text-text-muted"}>
@@ -100,6 +103,7 @@ export function SelectField({ field, value, onChange, error }: SelectFieldProps)
                 onChange={(e) => { setQuery(e.target.value); setActive(0); }}
                 onKeyDown={onKeyDown}
                 placeholder="Search..."
+                aria-label={`Search ${field.label} options`}
                 className="w-full bg-transparent text-sm text-foreground placeholder:text-text-muted focus:outline-none"
               />
             </div>

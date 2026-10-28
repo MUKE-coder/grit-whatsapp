@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/chrome/PageHeader";
 import { ResponsiveSheet } from "@/components/ui/ResponsiveSheet";
 import { IconButton } from "@/components/ui/IconButton";
 import { Plus, MessageSquare, AlertCircle } from "@/lib/icons";
+import { detailHref } from "@/lib/detail-href";
 import { apiClient } from "@/lib/api-client";
 import { buttonClasses } from "@/components/ui/button";
 import { inputClasses } from "@/components/ui/input";
@@ -69,7 +70,7 @@ export default function SupportPage() {
             onClick={() => setStatus(s)}
             className={
               "inline-flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium capitalize transition-colors " +
-              (status === s ? "bg-accent text-white" : "text-text-secondary hover:text-foreground")
+              (status === s ? "bg-accent text-accent-fg" : "text-text-secondary hover:text-foreground")
             }
           >
             {s === "open" ? <MessageSquare className="h-3.5 w-3.5" /> : <AlertCircle className="h-3.5 w-3.5" />}
@@ -116,7 +117,7 @@ export default function SupportPage() {
           {tickets.map((t) => (
             <li key={t.id}>
               <Link
-                href={"/system/support/" + t.id}
+                href={detailHref("/system/support", t.id)}
                 className="block rounded-xl border border-border bg-bg-elevated p-4 transition-colors hover:bg-bg-hover"
               >
                 <div className="flex items-start justify-between gap-4">

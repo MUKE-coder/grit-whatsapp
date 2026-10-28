@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -12,8 +13,10 @@ import (
 
 	"whatsapp/apps/api/internal/authz"
 	"whatsapp/apps/api/internal/crypto"
+	"whatsapp/apps/api/internal/events"
 	"whatsapp/apps/api/internal/models"
 	"whatsapp/apps/api/internal/paginate"
+	"whatsapp/apps/api/internal/password"
 	"whatsapp/apps/api/internal/respond"
 	"whatsapp/apps/api/internal/services"
 )
@@ -104,23 +107,18 @@ func (h *UserHandler) Create(c *gin.Context) {
 	})
 }
 
-// userListConfig is the one description of what the users list may be
-// searched, sorted and filtered by.
+// users is the service every method below calls, and the only thing here that
+// touches the database. Built per request because it is one field and a struct
+// literal, and because building it here means the wiring in routes.go did not
+// have to change.
 //
-// The filters are the point. The admin's users page ships a Role dropdown, a
-// Status toggle and a Provider dropdown, and its "Active Users" stat card asks
-// for /api/users?active=true&page_size=1. The hand-rolled list read none of
-// them: every filter returned the whole table and the Active Users card
-// reported the total user count.
-var userListConfig = paginate.Config{
-	Searchable: []string{"first_name", "last_name", "email"},
-	Sortable: map[string]bool{
-		"id": true, "first_name": true, "last_name": true,
-		"email": true, "role": true, "created_at": true,
-	},
-	Filterable:   map[string]bool{"role": true, "active": true, "provider": true},
-	DefaultSort:  "created_at",
-	DefaultOrder: "desc",
+// What a user endpoint may search, sort and filter by, how a role assignment is
+// kept in step with users.role, and which of those writes share a transaction
+// are all decisions about data, so they are the service's: see
+// internal/services/user.go. The same methods are what a job or a console
+// command calls, which is the point of moving them.
+func (h *UserHandler) users() *services.UserService {
+	return &services.UserService{DB: h.DB}
 }
 
 // List returns a paginated list of users.
@@ -131,11 +129,7 @@ var userListConfig = paginate.Config{
 // over a full page of rows. paginate.List is the same logic every generated
 // resource already uses, so a fix to it now reaches this endpoint too.
 func (h *UserHandler) List(c *gin.Context) {
-	res, err := paginate.List[models.User](
-		h.DB.WithContext(c.Request.Context()).Model(&models.User{}),
-		paginate.Bind(c),
-		userListConfig,
-	)
+	res, err := h.users().List(c.Request.Context(), paginate.Bind(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
@@ -153,8 +147,8 @@ func (h *UserHandler) List(c *gin.Context) {
 func (h *UserHandler) GetByID(c *gin.Context) {
 	id := c.Param("id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", id).First(&user).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), id)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
@@ -162,53 +156,6 @@ func (h *UserHandler) GetByID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"data": user,
 	})
-}
-
-// syncUserRoleAssignment makes the user_roles table reflect a single role name.
-//
-// The admin UI edits a user's role as one string, while authorization resolves
-// through the many-to-many user_roles table. This bridges the two so the simple
-// dropdown keeps working and actually takes effect.
-//
-// Assign several roles to one user with PUT /api/users/:id/roles instead — that
-// endpoint is the full many-to-many path and this helper is its one-role case.
-//
-// A role name with no matching row (a custom legacy string) clears the
-// assignments and lets grant resolution fall back to users.role, rather than
-// failing the update.
-func syncUserRoleAssignment(db *gorm.DB, userID, roleName string) error {
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		return writeUserRoleAssignment(tx, userID, roleName)
-	}); err != nil {
-		return err
-	}
-
-	// Permissions just changed for this user; drop the cached grants. After the
-	// commit, never inside it: a request that resolved grants while the
-	// transaction was still open would cache rows that had yet to exist.
-	authz.Invalidate()
-	return nil
-}
-
-// writeUserRoleAssignment is the same work with no transaction of its own, for
-// a caller that already has one. Update needs it: the assignment and the row
-// are one change and have to succeed or fail together.
-//
-// It does not invalidate the grant cache. Only the caller knows when its
-// transaction commits, and that is the moment the cache is stale.
-func writeUserRoleAssignment(tx *gorm.DB, userID, roleName string) error {
-	var role models.Role
-	err := tx.Where("name = ?", roleName).First(&role).Error
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	if err := tx.Where("user_id = ?", userID).Delete(&models.UserRole{}).Error; err != nil {
-		return err
-	}
-	if role.ID == "" {
-		return nil // unknown name — fall back to the legacy string
-	}
-	return tx.Create(&models.UserRole{UserID: userID, RoleID: role.ID}).Error
 }
 
 // Changes to a user.
@@ -229,8 +176,8 @@ type UpdateUserRequest struct {
 func (h *UserHandler) Update(c *gin.Context) {
 	id := c.Param("id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", id).First(&user).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), id)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
@@ -245,7 +192,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 	// Only an ADMIN changes an ADMIN account or makes one. Before, a users.edit
 	// holder could PUT {"role":"ADMIN"} on themselves, or reset an
 	// administrator's password or email and sign in as them.
-	if !authz.IsAdmin(c) && authz.IsAdminAccount(h.DB, &user) {
+	if !authz.IsAdmin(c) && authz.IsAdminAccount(h.DB, user) {
 		respond.Fail(c, respond.CodeForbidden, "Only an ADMIN can change an ADMIN account")
 		return
 	}
@@ -288,23 +235,9 @@ func (h *UserHandler) Update(c *gin.Context) {
 		updates["active"] = *req.Active
 	}
 
-	// Both writes, or neither.
-	//
-	// Grant resolution prefers the user_roles table and only falls back to
-	// users.role, so changing the Role dropdown has to change the assignment
-	// as well or it is a silent no-op. They used to be two separate writes,
-	// the assignment first: when the Updates that followed failed, the user
-	// kept the permissions of the new role while users.role still read as the
-	// old one, and nothing anywhere said so. One transaction now, so a failure
-	// leaves the account exactly as it was.
-	if err := h.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if req.Role != "" {
-			if err := writeUserRoleAssignment(tx, user.ID, req.Role); err != nil {
-				return err
-			}
-		}
-		return tx.Model(&user).Updates(updates).Error
-	}); err != nil {
+	// The role assignment and the row are one change, and the service is where
+	// that is decided: see UserService.Update.
+	if err := h.users().Update(c.Request.Context(), user, updates, req.Role); err != nil {
 		if errors.Is(err, services.ErrEmailExists) || services.IsDuplicateKey(err) {
 			c.JSON(http.StatusConflict, gin.H{
 				"error": gin.H{
@@ -322,14 +255,11 @@ func (h *UserHandler) Update(c *gin.Context) {
 		})
 		return
 	}
-	if req.Role != "" {
-		authz.Invalidate()
-	}
-
 	// Reload to get updated values. A failure here is reported rather than
 	// ignored: the response used to carry whatever the struct happened to hold
 	// when the read failed, which is the row as it was before the update.
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", id).First(&user).Error; err != nil {
+	user, err = h.users().GetByID(c.Request.Context(), id)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
 				"code":    "INTERNAL_ERROR",
@@ -349,19 +279,19 @@ func (h *UserHandler) Update(c *gin.Context) {
 func (h *UserHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", id).First(&user).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), id)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
 
 	// Deleting an administrator is an ADMIN's call too.
-	if !authz.IsAdmin(c) && authz.IsAdminAccount(h.DB, &user) {
+	if !authz.IsAdmin(c) && authz.IsAdminAccount(h.DB, user) {
 		respond.Fail(c, respond.CodeForbidden, "Only an ADMIN can change an ADMIN account")
 		return
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Delete(&user).Error; err != nil {
+	if err := h.users().Delete(c.Request.Context(), user); err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to delete user")
 		return
 	}
@@ -373,10 +303,10 @@ func (h *UserHandler) Delete(c *gin.Context) {
 
 // GetProfile returns the currently authenticated user's profile.
 func (h *UserHandler) GetProfile(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID := c.GetString("user_id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", userID).First(&user).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
@@ -403,10 +333,10 @@ type UpdateProfileRequest struct {
 // UpdateProfile updates the currently authenticated user's profile.
 
 func (h *UserHandler) UpdateProfile(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+	userID := c.GetString("user_id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", userID).First(&user).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
@@ -448,14 +378,14 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		}
 	}
 	if emailChanged {
-		var taken int64
-		if err := h.DB.WithContext(c.Request.Context()).Model(&models.User{}).Where("LOWER(email) = LOWER(?) AND id <> ?", req.Email, user.ID).Count(&taken).Error; err != nil {
+		taken, err := h.users().EmailTakenByAnother(c.Request.Context(), req.Email, user.ID)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": gin.H{"code": "INTERNAL_ERROR", "message": "Failed to check the email address"},
 			})
 			return
 		}
-		if taken > 0 {
+		if taken {
 			c.JSON(http.StatusConflict, gin.H{
 				"error": gin.H{"code": "EMAIL_EXISTS", "message": "Another account already uses that email address"},
 			})
@@ -477,6 +407,20 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		updates["email_verified_at"] = nil
 	}
 	if req.Password != "" {
+		if failed := password.Check(req.Password, user.Email, user.FirstName, user.LastName); len(failed) > 0 {
+			respond.Fail(c, respond.CodeValidationError, password.Message(failed))
+			return
+		}
+		// The local rules judge shape. This asks whether the exact password is
+		// already on the lists attackers replay, which shape cannot tell you.
+		// Off unless PASSWORD_BREACH_CHECK is set, and it answers false whenever
+		// it cannot reach a definite yes.
+		if password.Breached(c.Request.Context(), req.Password) {
+			respond.Fail(c, respond.CodeValidationError, password.BreachMessage)
+			return
+		}
+	}
+	if req.Password != "" {
 		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			respond.Fail(c, respond.CodeInternalError, "Failed to hash password")
@@ -495,12 +439,14 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 		updates["bio"] = crypto.EncryptedString(req.Bio)
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Model(&user).Updates(updates).Error; err != nil {
+	// No role here: changing your own role is not something this endpoint does.
+	if err := h.users().Update(c.Request.Context(), user, updates, ""); err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to update profile")
 		return
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", userID).First(&user).Error; err != nil {
+	user, err = h.users().GetByID(c.Request.Context(), user.ID)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error": gin.H{
 				"code":    "INTERNAL_ERROR",
@@ -544,16 +490,109 @@ func (h *UserHandler) UpdateProfile(c *gin.Context) {
 }
 
 // DeleteProfile soft-deletes the currently authenticated user's account.
-func (h *UserHandler) DeleteProfile(c *gin.Context) {
-	userID, _ := c.Get("user_id")
+// DeletedAccounts answers GET /admin/deleted-accounts.
+//
+// A closed account is a soft delete like any other row, and until this nothing
+// could see it: "I deleted my account by mistake" had no answer short of a SQL
+// console. Users are deliberately not in the sync registry the bin reads, so
+// they get their own three endpoints rather than a table name in that one.
+func (h *UserHandler) DeletedAccounts(c *gin.Context) {
+	// Selected into a shape of its own rather than returned as models.User.
+	// The model tags DeletedAt as json:"-", which is right everywhere else and
+	// wrong here: it is the one column this page is about, and without it the
+	// "Closed" column shows a dash for every row.
+	type deletedAccount struct {
+		ID        string     `json:"id"`
+		FirstName string     `json:"first_name"`
+		LastName  string     `json:"last_name"`
+		Email     string     `json:"email"`
+		Role      string     `json:"role"`
+		DeletedAt *time.Time `json:"deleted_at"`
+	}
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", userID).First(&user).Error; err != nil {
+	var accounts []deletedAccount
+	if err := h.DB.WithContext(c.Request.Context()).
+		Model(&models.User{}).
+		Unscoped().
+		Select("id", "first_name", "last_name", "email", "role", "deleted_at").
+		Where("deleted_at IS NOT NULL").
+		Order("deleted_at DESC").
+		Limit(200).
+		Find(&accounts).Error; err != nil {
+		respond.WriteError(c, err, "Failed to list deleted accounts")
+		return
+	}
+	respond.OK(c, accounts)
+}
+
+// RestoreAccount answers POST /admin/deleted-accounts/:id/restore.
+func (h *UserHandler) RestoreAccount(c *gin.Context) {
+	id := c.Param("id")
+	res := h.DB.WithContext(c.Request.Context()).
+		Unscoped().
+		Model(&models.User{}).
+		Where("id = ? AND deleted_at IS NOT NULL", id).
+		Update("deleted_at", nil)
+	if res.Error != nil {
+		respond.WriteError(c, res.Error, "Failed to restore the account")
+		return
+	}
+	if res.RowsAffected == 0 {
+		respond.NotFound(c, "No deleted account with that id")
+		return
+	}
+	events.Emitted(c, "users", "User", "restore", id, "restored a deleted account", "the account can sign in again", nil, nil)
+	respond.OK(c, gin.H{"id": id}, "Account restored")
+}
+
+// PurgeAccount answers DELETE /admin/deleted-accounts/:id.
+//
+// The row and nothing else. Erasing what a person left behind across every
+// table is a different operation with different law attached to it, and it
+// already exists at /system/gdpr.
+func (h *UserHandler) PurgeAccount(c *gin.Context) {
+	id := c.Param("id")
+	if id == c.GetString("user_id") {
+		respond.Forbidden(c, "That is the account you are signed in with")
+		return
+	}
+	res := h.DB.WithContext(c.Request.Context()).
+		Unscoped().
+		Where("id = ? AND deleted_at IS NOT NULL", id).
+		Delete(&models.User{})
+	if res.Error != nil {
+		respond.WriteError(c, res.Error, "Failed to delete the account")
+		return
+	}
+	if res.RowsAffected == 0 {
+		respond.NotFound(c, "No deleted account with that id")
+		return
+	}
+	events.Emitted(c, "users", "User", "purge", id, "permanently deleted an account", "the row is gone; a GDPR erasure covers the rest", nil, nil)
+	respond.OK(c, gin.H{"id": id}, "Account deleted for good")
+}
+
+func (h *UserHandler) DeleteProfile(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	user, err := h.users().GetByID(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Delete(&user).Error; err != nil {
+	// An administrator cannot close their own account.
+	//
+	// This is how an organisation locks itself out of its own admin panel, and
+	// the account that did it is the one that could have undone it. Another
+	// administrator can still remove this one from the Users screen, which
+	// reaches the same end with somebody left holding the keys.
+	if user.Role == "ADMIN" {
+		respond.Forbidden(c, "An administrator cannot close their own account. Ask another administrator to remove it, or change this account's role first.")
+		return
+	}
+
+	if err := h.users().Delete(c.Request.Context(), user); err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to delete account")
 		return
 	}

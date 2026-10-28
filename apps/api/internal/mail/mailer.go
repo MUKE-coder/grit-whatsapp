@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"time"
 )
 
 // Mailer sends email through a Transport. FromConfig picks the transport once
@@ -49,6 +50,17 @@ type SendOptions struct {
 
 // Send renders a template from EmailTemplates and sends it.
 func (m *Mailer) Send(ctx context.Context, opts SendOptions) error {
+	// The subject doubles as the <title> and, unless the caller says otherwise,
+	// as the inbox preview line.
+	if opts.Data == nil {
+		opts.Data = map[string]interface{}{}
+	}
+	if opts.Data["Subject"] == nil {
+		opts.Data["Subject"] = opts.Subject
+	}
+	if opts.Data["Preheader"] == nil {
+		opts.Data["Preheader"] = opts.Subject
+	}
 	htmlBody, err := m.renderTemplate(opts.Template, opts.Data)
 	if err != nil {
 		return fmt.Errorf("rendering template %q: %w", opts.Template, err)
@@ -77,10 +89,27 @@ func (m *Mailer) SendMessage(ctx context.Context, msg *Message) error {
 	return m.transport.Send(ctx, &out)
 }
 
+// renderTemplate renders a fragment and wraps it in Layout.
+//
+// Two passes on purpose. The fragment is rendered first so that whatever it
+// produces becomes the Content of the shell, which means a template can put a
+// button or a code block inside the card without the shell knowing anything
+// about it.
 func (m *Mailer) renderTemplate(name string, data map[string]interface{}) (string, error) {
 	tmplStr, ok := EmailTemplates[name]
 	if !ok {
 		return "", fmt.Errorf("template %q not found", name)
+	}
+
+	full := map[string]interface{}{}
+	for k, v := range Style(Theme()) {
+		full[k] = v
+	}
+	for k, v := range data {
+		full[k] = v
+	}
+	if full["Year"] == nil {
+		full["Year"] = time.Now().Year()
 	}
 
 	tmpl, err := template.New(name).Parse(tmplStr)
@@ -88,10 +117,30 @@ func (m *Mailer) renderTemplate(name string, data map[string]interface{}) (strin
 		return "", fmt.Errorf("parsing template %q: %w", name, err)
 	}
 
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	var body bytes.Buffer
+	if err := tmpl.Execute(&body, full); err != nil {
 		return "", fmt.Errorf("executing template %q: %w", name, err)
 	}
 
-	return buf.String(), nil
+	// The fragment is our own markup, already escaped by its own pass, so it
+	// goes into the shell as HTML rather than being escaped a second time into
+	// visible angle brackets. Escaping twice is what turns a paragraph into
+	// visible &lt;p&gt; in somebody's inbox.
+	//
+	// Safe because body is the output of html/template, not an input to it:
+	// whatever the caller put in the data was escaped when the fragment was
+	// executed, one statement above.
+	//nolint:gosec // G203: already escaped by the fragment's own render
+	//#nosec G203
+	full["Content"] = template.HTML(body.String())
+
+	shell, err := template.New("layout").Parse(Layout)
+	if err != nil {
+		return "", fmt.Errorf("parsing the mail layout: %w", err)
+	}
+	var out bytes.Buffer
+	if err := shell.Execute(&out, full); err != nil {
+		return "", fmt.Errorf("executing the mail layout: %w", err)
+	}
+	return out.String(), nil
 }

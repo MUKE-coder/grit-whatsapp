@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,4 +252,141 @@ func TouchConnection(db *gorm.DB, id string) {
 	if err := db.Model(&models.SSOConnection{}).Where("id = ?", id).Update("last_used_at", now).Error; err != nil {
 		log.Printf("sso: recording use of connection %s: %v", id, err)
 	}
+}
+
+// SSOService owns the connection and identity tables.
+//
+// The registry above holds the live providers; this holds the rows they are
+// built from, and the external identities a sign-in matches against. The handler
+// decides what a refusal says and which fields a request may set. What a
+// connection is, and which account an assertion belongs to, is decided here, so
+// a console command that provisions a connection and the admin screen that
+// creates one apply the same rules.
+type SSOService struct {
+	DB *gorm.DB
+}
+
+func (s *SSOService) db(ctx context.Context) *gorm.DB {
+	return s.DB.WithContext(ctx)
+}
+
+// All lists every connection, newest first, which is the order the admin screen
+// shows them in.
+func (s *SSOService) All(ctx context.Context) ([]models.SSOConnection, error) {
+	var conns []models.SSOConnection
+	if err := s.db(ctx).Order("created_at desc").Find(&conns).Error; err != nil {
+		return nil, err
+	}
+	return conns, nil
+}
+
+// ByID reads one connection.
+func (s *SSOService) ByID(ctx context.Context, id string) (*models.SSOConnection, error) {
+	var conn models.SSOConnection
+	if err := s.db(ctx).Where("id = ?", id).First(&conn).Error; err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
+// EnabledBySlug reads the connection a callback belongs to, and only while it is
+// enabled: a connection turned off mid-flow stops being a way in.
+func (s *SSOService) EnabledBySlug(ctx context.Context, slug string) (*models.SSOConnection, error) {
+	var conn models.SSOConnection
+	if err := s.db(ctx).Where("slug = ? AND enabled = ?", slug, true).First(&conn).Error; err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
+// EnabledBySlugAndProtocol is EnabledBySlug for a flow that only one protocol
+// can answer: a SAML assertion arriving for a connection that has been switched
+// to OIDC is not a sign-in, it is a stale bookmark.
+func (s *SSOService) EnabledBySlugAndProtocol(ctx context.Context, slug, protocol string) (*models.SSOConnection, error) {
+	var conn models.SSOConnection
+	if err := s.db(ctx).Where("slug = ? AND enabled = ? AND protocol = ?", slug, true, protocol).
+		First(&conn).Error; err != nil {
+		return nil, err
+	}
+	return &conn, nil
+}
+
+// Create saves a new connection.
+func (s *SSOService) Create(ctx context.Context, conn *models.SSOConnection) error {
+	return s.db(ctx).Create(conn).Error
+}
+
+// Update writes the columns a request sent and returns the row as it now
+// stands, because the admin screen renders what comes back and a connection
+// carries fields the request never named.
+func (s *SSOService) Update(ctx context.Context, conn *models.SSOConnection, updates map[string]interface{}) (*models.SSOConnection, error) {
+	if err := s.db(ctx).Model(conn).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return s.ByID(ctx, conn.ID)
+}
+
+// Delete removes a connection.
+func (s *SSOService) Delete(ctx context.Context, id string) error {
+	return s.db(ctx).Where("id = ?", id).Delete(&models.SSOConnection{}).Error
+}
+
+// DomainClaimedElsewhere returns a domain in domains that another connection
+// already claims, and that connection's name.
+//
+// Discovery sends an address to the first connection claiming its domain, so two
+// claiming one made which identity provider a customer reaches depend on row
+// order. The comparison is on the parsed domain list rather than the stored
+// string, because "acme.com, acme.co.uk" and "acme.co.uk,acme.com" are the same
+// claim.
+func (s *SSOService) DomainClaimedElsewhere(ctx context.Context, domains, exceptID string) (string, string, error) {
+	wanted := map[string]bool{}
+	for _, d := range (&models.SSOConnection{Domains: domains}).DomainList() {
+		wanted[d] = true
+	}
+	if len(wanted) == 0 {
+		return "", "", nil
+	}
+	q := s.db(ctx)
+	if exceptID != "" {
+		q = q.Where("id <> ?", exceptID)
+	}
+	var others []models.SSOConnection
+	if err := q.Find(&others).Error; err != nil {
+		return "", "", err
+	}
+	for _, o := range others {
+		for _, d := range o.DomainList() {
+			if wanted[d] {
+				return d, o.Name, nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
+// IdentityBySubject reads the link between a connection and the subject its
+// identity provider asserts.
+//
+// The subject is matched before the email because it is the only identifier an
+// identity provider guarantees stable: somebody who changes their address there
+// keeps their account rather than quietly getting a second one.
+func (s *SSOService) IdentityBySubject(ctx context.Context, provider, subject string) (*models.UserIdentity, error) {
+	var identity models.UserIdentity
+	if err := s.db(ctx).Where("provider = ? AND subject = ?", provider, subject).First(&identity).Error; err != nil {
+		return nil, err
+	}
+	return &identity, nil
+}
+
+// RecordIdentityLogin notes when a link was last used, and the address the
+// identity provider asserted this time.
+func (s *SSOService) RecordIdentityLogin(ctx context.Context, identity *models.UserIdentity, at time.Time, email string) error {
+	return s.db(ctx).Model(identity).
+		Updates(map[string]interface{}{"last_login_at": at, "email": email}).Error
+}
+
+// LinkIdentity records the link, so the next sign-in matches on the subject.
+func (s *SSOService) LinkIdentity(ctx context.Context, link *models.UserIdentity) error {
+	return s.db(ctx).Create(link).Error
 }

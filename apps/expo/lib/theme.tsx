@@ -17,6 +17,12 @@ export interface Palette {
   scheme: "light" | "dark";
   statusBar: "light" | "dark";
   headerGradient: [string, string, string];
+  // The brand colour as a fill, and a label colour that reads on it. The
+  // lettermark on the auth screens uses both: it used to be an <Image> of
+  // assets/icon.png, which every scaffold shipped as the Grit logo.
+  accent: string;
+  accentHover: string;
+  accentForeground: string;
   logoShadow: string;
   gridLine: string;
   gridOpacity: number;
@@ -32,8 +38,11 @@ export interface Palette {
 const LIGHT: Palette = {
   scheme: "light",
   statusBar: "dark",
-  headerGradient: ["#EFEBFF", "#F6F4FF", "#FFFFFF"],
-  logoShadow: "#6c5ce7",
+  headerGradient: ["rgba(37, 99, 235, 0.1)", "rgba(37, 99, 235, 0.04)", "#FFFFFF"],
+  accent: "#2563eb",
+  accentHover: "#1d4ed8",
+  accentForeground: "#ffffff",
+  logoShadow: "#2563eb",
   gridLine: "#0f1018",
   gridOpacity: 0.04,
   inputIcon: "#9CA3AF",
@@ -42,14 +51,17 @@ const LIGHT: Palette = {
   tabBarBorder: "#E5E7EB",
   tabInactive: "#9CA3AF",
   blurTint: "light",
-  refresh: "#6c5ce7",
+  refresh: "#2563eb",
 };
 
 const DARK: Palette = {
   scheme: "dark",
   statusBar: "light",
-  headerGradient: ["#1c1830", "#15121f", "#111118"],
-  logoShadow: "#6c5ce7",
+  headerGradient: ["rgba(37, 99, 235, 0.18)", "rgba(37, 99, 235, 0.07)", "#111118"],
+  accent: "#2563eb",
+  accentHover: "#1d4ed8",
+  accentForeground: "#ffffff",
+  logoShadow: "#2563eb",
   gridLine: "#e8e8f0",
   gridOpacity: 0.06,
   inputIcon: "#606078",
@@ -58,7 +70,7 @@ const DARK: Palette = {
   tabBarBorder: "#22222e",
   tabInactive: "#606078",
   blurTint: "dark",
-  refresh: "#6c5ce7",
+  refresh: "#2563eb",
 };
 
 interface ThemeContextType {

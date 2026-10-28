@@ -2,23 +2,27 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
-	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/png"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/boombuler/barcode/qr"
 	"github.com/gin-gonic/gin"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 
+	"whatsapp/apps/api/internal/config"
 	"whatsapp/apps/api/internal/crypto"
+	"whatsapp/apps/api/internal/jobs"
+	"whatsapp/apps/api/internal/mail"
 	"whatsapp/apps/api/internal/models"
 	"whatsapp/apps/api/internal/respond"
 	"whatsapp/apps/api/internal/services"
@@ -30,6 +34,24 @@ type TOTPHandler struct {
 	DB          *gorm.DB
 	AuthService *services.AuthService
 	Issuer      string // App name for authenticator display
+
+	// Set when the second factor can be a code by email.
+	Config *config.Config
+	Mailer *mail.Mailer
+	Jobs   *jobs.Client
+}
+
+// twoFactor is the service every method below reads and writes through. Built
+// per request because it is one field and a struct literal, and because building
+// it here means the wiring in routes.go did not have to change.
+//
+// Three of its methods are compare-and-sets, and they are why this handler could
+// not keep its own queries: whether a code, a backup code or a pending token was
+// spent by this request and not another one is a question only the write can
+// answer, and the answer has to be in one place. See
+// internal/services/two_factor.go.
+func (h *TOTPHandler) twoFactor() *services.TwoFactorService {
+	return &services.TwoFactorService{DB: h.DB}
 }
 
 type totpSetupResponse struct {
@@ -76,9 +98,7 @@ func (h *TOTPHandler) Setup(c *gin.Context) {
 		return
 	}
 
-	// Check if TOTP is already enabled
-	var existing models.TwoFactorConfig
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ?", userID).First(&existing).Error; err == nil && existing.Enabled {
+	if h.twoFactor().IsEnabled(c.Request.Context(), userID) {
 		respond.Fail(c, respond.CodeTOTPAlreadyEnabled, "Two-factor authentication is already enabled")
 		return
 	}
@@ -110,6 +130,33 @@ func (h *TOTPHandler) Setup(c *gin.Context) {
 	})
 }
 
+// totpRefusal explains a refused code.
+//
+// The code is refused either way. This only decides what to tell the person,
+// and the difference matters: "your clock is 90 seconds behind" is something
+// they can fix in a minute, while "invalid code" sends them to re-scan a QR
+// that was never wrong.
+//
+// It says nothing an attacker can use. Learning that a guess landed near the
+// window requires guessing a valid six-digit code for a nearby step, which is
+// the same work as guessing the current one, and the attempt is counted the
+// same way.
+func totpRefusal(secret, code string) string {
+	if off, found := totp.SkewSeconds(secret, code); found {
+		direction := "behind"
+		if off > 0 {
+			direction = "ahead of"
+		}
+		if off < 0 {
+			off = -off
+		}
+		return fmt.Sprintf(
+			"That code was right, but your device's clock is about %d seconds %s this server's, so the code had already changed. Turn on automatic time on your phone and try the next code.",
+			off, direction)
+	}
+	return "Invalid verification code. Check you are reading the code for this account, and that it has not just expired."
+}
+
 // Enable verifies the initial TOTP code and activates 2FA for the user.
 // Returns backup codes that the user should save.
 func (h *TOTPHandler) Enable(c *gin.Context) {
@@ -124,18 +171,20 @@ func (h *TOTPHandler) Enable(c *gin.Context) {
 	// Enabling replaces the secret, so it is refused while 2FA is on: a stolen
 	// session could otherwise re-enrol the account to an authenticator the
 	// attacker holds. Disabling first asks for the password.
-	var existing models.TwoFactorConfig
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ?", userID).First(&existing).Error; err == nil && existing.Enabled {
+	if h.twoFactor().IsEnabled(c.Request.Context(), userID) {
 		respond.Fail(c, respond.CodeTOTPAlreadyEnabled, "Two-factor authentication is already enabled. Disable it first.")
 		return
 	}
 
-	// Verify the code matches the secret
-	step, valid, err := totp.ValidateCodeStep(req.Secret, req.Code)
+	// Enrolment searches wider than a sign-in does, and keeps the offset it
+	// finds. Refusing a correct code because the device's clock is a minute out
+	// leaves somebody who cannot change that clock with no second factor at all.
+	step, valid, err := totp.EnrolStep(req.Secret, req.Code)
 	if err != nil || !valid {
-		respond.Fail(c, respond.CodeInvalidTOTPCode, "Invalid verification code. Make sure your authenticator app is synced.")
+		respond.Fail(c, respond.CodeInvalidTOTPCode, totpRefusal(req.Secret, req.Code))
 		return
 	}
+	offset := step - time.Now().Unix()/totp.Period
 
 	// Generate backup codes
 	codes, hashes, err := totp.GenerateBackupCodes(0)
@@ -144,9 +193,8 @@ func (h *TOTPHandler) Enable(c *gin.Context) {
 		return
 	}
 
-	// Upsert the TwoFactorConfig
-	var config models.TwoFactorConfig
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ?", userID).FirstOrCreate(&config, models.TwoFactorConfig{UserID: userID}).Error; err != nil {
+	config, err := h.twoFactor().EnsureConfig(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Failed to enable two-factor authentication")
 		return
 	}
@@ -157,8 +205,155 @@ func (h *TOTPHandler) Enable(c *gin.Context) {
 	config.BackupCodes = hashes
 	// The code that enabled 2FA is spent; it cannot also sign in.
 	config.LastUsedStep = step
+	config.StepOffset = offset
 
-	if err := h.DB.WithContext(c.Request.Context()).Save(&config).Error; err != nil {
+	if err := h.twoFactor().SaveConfig(c.Request.Context(), config); err != nil {
+		respond.Fail(c, respond.CodeTOTPError, "Failed to enable two-factor authentication")
+		return
+	}
+
+	message := "Two-factor authentication enabled. Save your backup codes in a safe place."
+	if offset != 0 {
+		// Said out loud, because the account now depends on a clock the person
+		// may not know is wrong, and because a clock that has drifted once
+		// usually keeps drifting.
+		message += fmt.Sprintf(
+			" Your device's clock is about %d seconds %s this server's; that has been allowed for, but it is worth fixing.",
+			abs64(offset*totp.Period), aheadOrBehind(offset))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"enabled":      true,
+			"backup_codes": codes,
+			"clock_offset": offset * totp.Period,
+		},
+		"message": message,
+	})
+}
+
+// abs64 is the absolute value, for turning an offset into a distance.
+func abs64(n int64) int64 {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+// aheadOrBehind names the direction of a clock offset.
+func aheadOrBehind(offset int64) string {
+	if offset > 0 {
+		return "ahead of"
+	}
+	return "behind"
+}
+
+// SendEmailSetupCode emails a code to prove the address works, before email
+// becomes this account's second factor.
+//
+//	POST /api/v1/auth/totp/email/send
+func (h *TOTPHandler) SendEmailSetupCode(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	user, err := h.AuthService.UserByID(c.Request.Context(), userID)
+	if err != nil {
+		respond.Fail(c, respond.CodeNotFound, "User not found")
+		return
+	}
+
+	// Nothing to send with means nothing to sign in with later. Refused here
+	// rather than discovered at the next sign-in, when the person would be
+	// holding a factor they can never satisfy.
+	if h.Mailer == nil && h.Jobs == nil {
+		respond.Fail(c, respond.CodeMailFailed, "This deployment cannot send email yet, so codes by email cannot be turned on. Set MAIL_MAILER first.")
+		return
+	}
+
+	code, err := totp.GenerateEmailCode()
+	if err != nil {
+		respond.Fail(c, respond.CodeTOTPError, "Failed to create a code")
+		return
+	}
+	expires := time.Now().Add(totp.PendingTokenExpiry)
+
+	config, err := h.twoFactor().ConfigOrNew(c.Request.Context(), userID)
+	if err != nil {
+		respond.Fail(c, respond.CodeTOTPError, "Failed to start email two-factor setup")
+		return
+	}
+	config.Method = models.TwoFactorMethodEmail
+	config.SetupCodeHash = totp.HashToken(code)
+	config.SetupCodeExpiresAt = &expires
+	// Enabled is untouched: an account already using an authenticator keeps it
+	// working until the new method is confirmed.
+	if err := h.twoFactor().SaveConfig(c.Request.Context(), config); err != nil {
+		respond.Fail(c, respond.CodeTOTPError, "Failed to start email two-factor setup")
+		return
+	}
+
+	if err := dispatchMail(c.Request.Context(), h.Mailer, h.Jobs, "two-factor-setup:"+userID+":"+config.SetupCodeHash, mail.SendOptions{
+		To:       user.Email,
+		Subject:  "Your sign-in code",
+		Template: "two-factor-code",
+		Data: map[string]interface{}{
+			"AppName": h.Config.AppName,
+			"Title":   "Your sign-in code",
+			"Code":    code,
+			"Minutes": int(totp.PendingTokenExpiry.Minutes()),
+			"Year":    time.Now().Year(),
+		},
+	}); err != nil {
+		log.Printf("two-factor setup: emailing a code to %s: %v", userID, err)
+		respond.Fail(c, respond.CodeMailFailed, "We could not email your code. Check the mail settings and try again.")
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":    gin.H{"sent_to": user.Email},
+		"message": "We sent a code to " + user.Email + ".",
+	})
+}
+
+// EnableEmail turns on the email second factor once its code comes back.
+//
+//	POST /api/v1/auth/totp/email/enable
+func (h *TOTPHandler) EnableEmail(c *gin.Context) {
+	var req struct {
+		Code string `json:"code" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respond.Fail(c, respond.CodeValidationError, err.Error())
+		return
+	}
+
+	userID := c.GetString("user_id")
+	config, err := h.twoFactor().Config(c.Request.Context(), userID)
+	if err != nil {
+		respond.Fail(c, respond.CodeNotFound, "Ask for a code first.")
+		return
+	}
+	if config.SetupCodeHash == "" || config.SetupCodeExpiresAt == nil || time.Now().After(*config.SetupCodeExpiresAt) {
+		respond.Fail(c, respond.CodeInvalidCode, "That code has expired. Ask for a new one.")
+		return
+	}
+	if !totp.EmailCodeMatches(config.SetupCodeHash, req.Code) {
+		respond.Fail(c, respond.CodeInvalidCode, "That code is wrong. Check the email and try again.")
+		return
+	}
+
+	// Spent on use, and the method is only committed here: until this point an
+	// account with an authenticator still has one.
+	codes, hashes, err := totp.GenerateBackupCodes(0)
+	if err != nil {
+		respond.Fail(c, respond.CodeTOTPError, "Failed to create backup codes")
+		return
+	}
+	config.Enabled = true
+	config.Method = models.TwoFactorMethodEmail
+	config.SetupCodeHash = ""
+	config.SetupCodeExpiresAt = nil
+	config.BackupCodes = hashes
+	if err := h.twoFactor().SaveConfig(c.Request.Context(), config); err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Failed to enable two-factor authentication")
 		return
 	}
@@ -166,9 +361,10 @@ func (h *TOTPHandler) Enable(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"enabled":      true,
+			"method":       models.TwoFactorMethodEmail,
 			"backup_codes": codes,
 		},
-		"message": "Two-factor authentication enabled. Save your backup codes in a safe place.",
+		"message": "Codes by email are on. Save your backup codes: they are how you get in if you lose the mailbox.",
 	})
 }
 
@@ -186,19 +382,43 @@ func (h *TOTPHandler) Verify(c *gin.Context) {
 		return
 	}
 
-	step, valid, err := totp.ValidateCodeStep(string(config.Secret), req.Code)
+	// A challenge sent by email carries its own code. Nothing else about the
+	// flow changes: same pending token, same attempt counting, same trusted
+	// device, same session at the end.
+	if pending.CodeHash != "" {
+		if !totp.EmailCodeMatches(pending.CodeHash, req.Code) {
+			h.failSecondFactor(pending, user)
+			respond.Fail(c, respond.CodeInvalidCode, "That code is wrong or has expired. Check the email, or sign in again for a new code.")
+			return
+		}
+		// Spent, and spent by this request and no other: see
+		// SpendEmailChallengeCode.
+		spent, err := h.twoFactor().SpendEmailChallengeCode(c.Request.Context(), pending)
+		if err != nil {
+			respond.Fail(c, respond.CodeTOTPError, "Failed to complete sign-in")
+			return
+		}
+		if !spent {
+			respond.Fail(c, respond.CodeInvalidCode, "That code is wrong or has expired. Check the email, or sign in again for a new code.")
+			return
+		}
+		h.completeSecondFactor(c, pending, user, req.TrustDevice, nil, "Signed in")
+		return
+	}
+
+	step, valid, err := totp.ValidateCodeOffset(string(config.Secret), req.Code, config.StepOffset)
 	if err == nil && valid {
-		// A code is good for its window, so without this the same code signs in
-		// again for as long as it lasts. The step only moves forward, and the
-		// update is conditional, so two requests cannot both spend one code.
-		res := h.DB.WithContext(c.Request.Context()).Model(&models.TwoFactorConfig{}).
-			Where("id = ? AND last_used_step < ?", config.ID, step).
-			UpdateColumn("last_used_step", step)
-		valid = res.Error == nil && res.RowsAffected == 1
+		// A correct code is not enough: it also has to be unspent, which only the
+		// write can decide. See SpendTOTPStep.
+		spent, serr := h.twoFactor().SpendTOTPStep(c.Request.Context(), config, step)
+		valid = serr == nil && spent
 	}
 	if err != nil || !valid {
 		h.failSecondFactor(pending, user)
-		respond.Fail(c, respond.CodeInvalidTOTPCode, "Invalid verification code")
+		// Same diagnosis as enrolment: a clock that jumped since the device was
+		// enrolled is the usual reason a correct-looking code stops working,
+		// and "invalid code" sends people to their backup codes for nothing.
+		respond.Fail(c, respond.CodeInvalidTOTPCode, totpRefusal(string(config.Secret), req.Code))
 		return
 	}
 
@@ -215,12 +435,7 @@ func (h *TOTPHandler) Verify(c *gin.Context) {
 // update matches only a row that is still plaintext, and a failure is logged
 // and changes nothing: the secret keeps verifying either way.
 func (h *TOTPHandler) sealSecret(c *gin.Context, config *models.TwoFactorConfig) {
-	if !crypto.EncryptionEnabled() {
-		return
-	}
-	if err := h.DB.WithContext(c.Request.Context()).Model(&models.TwoFactorConfig{}).
-		Where("id = ? AND secret NOT LIKE ?", config.ID, "enc:v1:%").
-		UpdateColumn("secret", config.Secret).Error; err != nil {
+	if err := h.twoFactor().SealSecret(c.Request.Context(), config); err != nil {
 		log.Printf("totp: encrypting the stored secret for %s: %v", config.UserID, err)
 	}
 }
@@ -246,26 +461,14 @@ func (h *TOTPHandler) VerifyBackupCode(c *gin.Context) {
 	}
 
 	// Spend the backup code before signing in, and fail if that cannot be saved:
-	// a code that stays in the list stays usable.
-	remaining := make([]string, 0, len(config.BackupCodes)-1)
-	remaining = append(remaining, config.BackupCodes[:idx]...)
-	remaining = append(remaining, config.BackupCodes[idx+1:]...)
-	// The update matches only while the list is still the one this request
-	// read. Two requests carrying the same code both find it in the list; only
-	// the first to write can spend it, and the other is refused.
-	read, err := json.Marshal([]string(config.BackupCodes))
+	// a code that stays in the list stays usable. Whether this request spent it,
+	// rather than another one carrying the same code, is the service's to answer.
+	remaining, spent, err := h.twoFactor().SpendBackupCode(c.Request.Context(), config, idx)
 	if err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Failed to use the backup code")
 		return
 	}
-	res := h.DB.WithContext(c.Request.Context()).Model(&models.TwoFactorConfig{}).
-		Where("id = ? AND backup_codes = ?", config.ID, string(read)).
-		Update("backup_codes", datatypes.JSONSlice[string](remaining))
-	if res.Error != nil {
-		respond.Fail(c, respond.CodeTOTPError, "Failed to use the backup code")
-		return
-	}
-	if res.RowsAffected != 1 {
+	if !spent {
 		h.failSecondFactor(pending, user)
 		respond.Fail(c, respond.CodeInvalidBackupCode, "Invalid backup code")
 		return
@@ -286,8 +489,8 @@ func (h *TOTPHandler) beginSecondFactor(c *gin.Context, pendingToken string) (*m
 		respond.Fail(c, respond.CodeInvalidPendingToken, "Invalid or expired verification session. Please log in again.")
 	}
 
-	var pending models.TOTPPendingToken
-	if err := h.DB.WithContext(c.Request.Context()).Where("token_hash = ? AND expires_at > ?", totp.HashToken(pendingToken), time.Now()).First(&pending).Error; err != nil {
+	pending, err := h.twoFactor().PendingByToken(c.Request.Context(), pendingToken)
+	if err != nil {
 		invalid()
 		return nil, nil, nil, false
 	}
@@ -296,8 +499,8 @@ func (h *TOTPHandler) beginSecondFactor(c *gin.Context, pendingToken string) (*m
 		return nil, nil, nil, false
 	}
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", pending.UserID).First(&user).Error; err != nil {
+	user, err := h.AuthService.UserByID(c.Request.Context(), pending.UserID)
+	if err != nil {
 		invalid()
 		return nil, nil, nil, false
 	}
@@ -306,16 +509,29 @@ func (h *TOTPHandler) beginSecondFactor(c *gin.Context, pendingToken string) (*m
 		return nil, nil, nil, false
 	}
 	if user.LockedUntil != nil && time.Now().Before(*user.LockedUntil) {
+		// Retry-After, which the sign-in route deliberately cannot send.
+		//
+		// There, saying "locked" at all would confirm the address exists, so
+		// a locked account answers exactly like a wrong password. Here the
+		// password has already been checked and the caller is holding a
+		// pending token for this account, so they know it exists: naming the
+		// wait leaks nothing and is the difference between a client that can
+		// back off and one that guesses.
+		wait := int(time.Until(*user.LockedUntil).Seconds())
+		if wait < 1 {
+			wait = 1
+		}
+		c.Header("Retry-After", strconv.Itoa(wait))
 		respond.Fail(c, respond.CodeAccountLocked, "Too many failed attempts. Try again later, or reset your password.")
 		return nil, nil, nil, false
 	}
 
-	var config models.TwoFactorConfig
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ? AND enabled = ?", pending.UserID, true).First(&config).Error; err != nil {
+	config, err := h.twoFactor().EnabledConfig(c.Request.Context(), pending.UserID)
+	if err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Two-factor configuration not found")
 		return nil, nil, nil, false
 	}
-	return &pending, &user, &config, true
+	return pending, user, config, true
 }
 
 // failSecondFactor counts a wrong code against the pending token and against
@@ -323,31 +539,24 @@ func (h *TOTPHandler) beginSecondFactor(c *gin.Context, pendingToken string) (*m
 // one increment. Before, a pending token took unlimited guesses, and signing in
 // again with the password cleared the account's count.
 func (h *TOTPHandler) failSecondFactor(pending *models.TOTPPendingToken, user *models.User) {
-	if err := h.DB.Model(&models.TOTPPendingToken{}).Where("id = ?", pending.ID).
-		UpdateColumn("attempts", gorm.Expr("attempts + 1")).Error; err != nil {
+	ctx := context.Background()
+	if err := h.twoFactor().CountPendingAttempt(ctx, pending.ID); err != nil {
 		log.Printf("totp: counting an attempt for %s: %v", user.ID, err)
 	}
-	if err := h.DB.Model(&models.User{}).Where("id = ?", user.ID).
-		UpdateColumn("failed_login_count", gorm.Expr("failed_login_count + 1")).Error; err != nil {
+	count, err := h.AuthService.CountLoginFailure(ctx, user.ID)
+	if err != nil {
 		log.Printf("totp: counting a failure for %s: %v", user.ID, err)
 		return
 	}
-
-	var fresh models.User
-	if err := h.DB.Select("id", "failed_login_count").First(&fresh, "id = ?", user.ID).Error; err != nil {
-		return
-	}
-	if totp.MaxFailedAttempts <= 0 || fresh.FailedLoginCount < totp.MaxFailedAttempts {
+	// The policy is the handler's; the count it reads is the one the database
+	// holds now, not the one this request arrived with.
+	if totp.MaxFailedAttempts <= 0 || count < totp.MaxFailedAttempts {
 		return
 	}
 	until := time.Now().Add(totp.LockoutDuration)
-	if err := h.DB.Model(&models.User{}).Where("id = ?", user.ID).
-		Updates(map[string]interface{}{"locked_until": until, "failed_login_count": 0}).Error; err != nil {
+	if err := h.AuthService.LockAccount(ctx, user.ID, until); err != nil {
 		log.Printf("totp: locking %s: %v", user.ID, err)
 		return
-	}
-	if err := h.DB.Where("user_id = ?", user.ID).Delete(&models.TOTPPendingToken{}).Error; err != nil {
-		log.Printf("totp: clearing pending tokens for %s: %v", user.ID, err)
 	}
 	log.Printf("lockout: %s locked until %s after %d wrong 2FA codes", user.Email, until.Format(time.RFC3339), totp.MaxFailedAttempts)
 }
@@ -357,14 +566,13 @@ func (h *TOTPHandler) failSecondFactor(pending *models.TOTPPendingToken, user *m
 func (h *TOTPHandler) completeSecondFactor(c *gin.Context, pending *models.TOTPPendingToken, user *models.User, trustDevice bool, extra gin.H, message string) {
 	// Only the request that deletes the pending token may use it, so two
 	// requests carrying one token cannot both sign in.
-	res := h.DB.WithContext(c.Request.Context()).Delete(&models.TOTPPendingToken{}, pending.ID)
-	if res.Error != nil || res.RowsAffected != 1 {
+	spent, err := h.twoFactor().SpendPendingToken(c.Request.Context(), pending.ID)
+	if err != nil || !spent {
 		respond.Fail(c, respond.CodeInvalidPendingToken, "Invalid or expired verification session. Please log in again.")
 		return
 	}
 	if user.FailedLoginCount > 0 || user.LockedUntil != nil {
-		if err := h.DB.WithContext(c.Request.Context()).Model(&models.User{}).Where("id = ?", user.ID).
-			Updates(map[string]interface{}{"failed_login_count": 0, "locked_until": nil}).Error; err != nil {
+		if err := h.AuthService.ClearLoginFailures(c.Request.Context(), user.ID); err != nil {
 			log.Printf("totp: clearing the failure count for %s: %v", user.ID, err)
 		}
 	}
@@ -406,8 +614,8 @@ func (h *TOTPHandler) Disable(c *gin.Context) {
 	}
 
 	// Verify password
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", userID).First(&user).Error; err != nil {
+	user, err := h.AuthService.UserByID(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
@@ -417,17 +625,9 @@ func (h *TOTPHandler) Disable(c *gin.Context) {
 		return
 	}
 
-	// The config, the trusted devices and the pending tokens go together, or
-	// none of them do. The three deletes ran unchecked, and the answer was
-	// "disabled" whether or not anything had been deleted.
-	if err := h.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		for _, table := range []interface{}{&models.TwoFactorConfig{}, &models.TrustedDevice{}, &models.TOTPPendingToken{}} {
-			if err := tx.Where("user_id = ?", userID).Delete(table).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
+	// The config, the trusted devices and the pending tokens go together, or none
+	// of them do: see DisableFor.
+	if err := h.twoFactor().DisableFor(c.Request.Context(), userID); err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Failed to disable two-factor authentication")
 		return
 	}
@@ -441,18 +641,20 @@ func (h *TOTPHandler) Disable(c *gin.Context) {
 func (h *TOTPHandler) Status(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	var config models.TwoFactorConfig
 	enabled := false
 	backupCodesRemaining := 0
-
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ?", userID).First(&config).Error; err == nil {
+	if config, err := h.twoFactor().Config(c.Request.Context(), userID); err == nil {
 		enabled = config.Enabled
 		backupCodesRemaining = len(config.BackupCodes)
 	}
 
-	// Count trusted devices
-	var deviceCount int64
-	h.DB.WithContext(c.Request.Context()).Model(&models.TrustedDevice{}).Where("user_id = ? AND expires_at > ?", userID, time.Now()).Count(&deviceCount)
+	// The count behind the "trusted devices" line. Its error used to go nowhere,
+	// which read as "no trusted devices" on a database that was down.
+	deviceCount, err := h.twoFactor().CountTrustedDevices(c.Request.Context(), userID)
+	if err != nil {
+		respond.Fail(c, respond.CodeInternalError, "Failed to load two-factor status")
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
@@ -467,8 +669,8 @@ func (h *TOTPHandler) Status(c *gin.Context) {
 func (h *TOTPHandler) RegenerateBackupCodes(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	var config models.TwoFactorConfig
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ? AND enabled = ?", userID, true).First(&config).Error; err != nil {
+	config, err := h.twoFactor().EnabledConfig(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeTOTPNotEnabled, "Two-factor authentication is not enabled")
 		return
 	}
@@ -480,7 +682,7 @@ func (h *TOTPHandler) RegenerateBackupCodes(c *gin.Context) {
 	}
 
 	config.BackupCodes = hashes
-	if err := h.DB.WithContext(c.Request.Context()).Save(&config).Error; err != nil {
+	if err := h.twoFactor().SaveConfig(c.Request.Context(), config); err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Failed to save backup codes")
 		return
 	}
@@ -503,11 +705,8 @@ func (h *TOTPHandler) RegenerateBackupCodes(c *gin.Context) {
 func (h *TOTPHandler) ListTrustedDevices(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	var devices []models.TrustedDevice
-	if err := h.DB.WithContext(c.Request.Context()).
-		Where("user_id = ? AND expires_at > ?", userID, time.Now()).
-		Order("created_at desc").
-		Find(&devices).Error; err != nil {
+	devices, err := h.twoFactor().TrustedDevices(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to load trusted devices")
 		return
 	}
@@ -538,15 +737,14 @@ func (h *TOTPHandler) ListTrustedDevices(c *gin.Context) {
 func (h *TOTPHandler) RevokeTrustedDevice(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	// Scoped to the caller: without the user_id predicate this would let any
-	// authenticated user revoke anyone's device by guessing an id.
-	res := h.DB.WithContext(c.Request.Context()).Where("id = ? AND user_id = ?", c.Param("id"), userID).
-		Delete(&models.TrustedDevice{})
-	if res.Error != nil {
+	// Scoped to the caller by the service, so one authenticated user cannot
+	// revoke another's device by guessing an id.
+	revoked, err := h.twoFactor().RevokeTrustedDevice(c.Request.Context(), userID, c.Param("id"))
+	if err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to revoke the device")
 		return
 	}
-	if res.RowsAffected == 0 {
+	if !revoked {
 		respond.Fail(c, respond.CodeNotFound, "Trusted device not found")
 		return
 	}
@@ -558,7 +756,7 @@ func (h *TOTPHandler) RevokeTrustedDevice(c *gin.Context) {
 func (h *TOTPHandler) RevokeTrustedDevices(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	if err := h.DB.WithContext(c.Request.Context()).Where("user_id = ?", userID).Delete(&models.TrustedDevice{}).Error; err != nil {
+	if err := h.twoFactor().RevokeTrustedDevices(c.Request.Context(), userID); err != nil {
 		respond.Fail(c, respond.CodeTOTPError, "Failed to revoke trusted devices")
 		return
 	}
@@ -583,7 +781,7 @@ func (h *TOTPHandler) createTrustedDevice(c *gin.Context, userID string) {
 		ExpiresAt: time.Now().Add(totp.TrustedDeviceDuration),
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Create(&device).Error; err != nil {
+	if err := h.twoFactor().TrustDevice(c.Request.Context(), &device); err != nil {
 		return // Non-critical
 	}
 
@@ -603,16 +801,15 @@ func IsTrustedDevice(c *gin.Context, db *gorm.DB, userID string) bool {
 		return false
 	}
 
-	tokenHash := totp.HashToken(token)
-	var device models.TrustedDevice
-	if err := db.Where("user_id = ? AND token_hash = ? AND expires_at > ?", userID, tokenHash, time.Now()).First(&device).Error; err != nil {
+	twoFactor := &services.TwoFactorService{DB: db}
+	device, err := twoFactor.TrustedDeviceByToken(c.Request.Context(), userID, totp.HashToken(token))
+	if err != nil {
 		return false
 	}
 
 	// Refresh the device expiry (sliding window). The device is trusted either
 	// way; a refresh that fails only means the window is not extended.
-	device.ExpiresAt = time.Now().Add(totp.TrustedDeviceDuration)
-	if err := db.Model(&device).Update("expires_at", device.ExpiresAt).Error; err != nil {
+	if err := twoFactor.ExtendTrustedDevice(c.Request.Context(), device, time.Now().Add(totp.TrustedDeviceDuration)); err != nil {
 		log.Printf("totp: extending trusted device %d: %v", device.ID, err)
 	}
 

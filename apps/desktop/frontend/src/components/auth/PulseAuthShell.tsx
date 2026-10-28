@@ -22,7 +22,7 @@ export function PulseAuthShell({ theme, mode, title, subtitle, children, errorMe
       <div className="flex flex-1 items-center justify-center px-6 py-12 lg:px-12">
         <div className="w-full max-w-md space-y-8">
           <div className="flex items-center gap-2 text-xl font-bold" style={{ color: t.fg }}>
-            <BrandMark tint={t.primary} />
+            <BrandMark tint={t.primary} fg={t.primaryFg} />
             <span style={{ fontFamily: f.display }}>{brand.name}</span>
           </div>
 
@@ -74,7 +74,7 @@ export function PulseAuthShell({ theme, mode, title, subtitle, children, errorMe
           <div className="h-1 w-24 rounded-full" style={{ background: t.accent }} />
         </div>
 
-        <p className="text-sm opacity-50">Built with Grit — Go + React framework</p>
+        <p className="text-sm opacity-50">Built with Grit: Go + React framework</p>
       </div>
     </div>
   );

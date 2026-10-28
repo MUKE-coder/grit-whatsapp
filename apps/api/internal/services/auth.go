@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	"whatsapp/apps/api/internal/ids"
+	"whatsapp/apps/api/internal/models"
 )
 
 // AuthService handles JWT token operations.
@@ -21,6 +23,11 @@ type AuthService struct {
 	Secret        string
 	AccessExpiry  time.Duration
 	RefreshExpiry time.Duration
+
+	// Keys decides how tokens are signed and verified. Nil falls back to
+	// Secret as an HS256 key, which is what a project that has never
+	// configured anything else gets, and what the test helpers construct.
+	Keys *SigningKeys
 
 	// DB is where sessions live. When it is set, an access token is refused as
 	// soon as its session is revoked, rather than when the token expires.
@@ -119,12 +126,19 @@ func (s *AuthService) ValidateRefreshToken(tokenString string) (*Claims, error) 
 // ValidateToken checks a token's signature and expiry, and nothing about what
 // kind of token it is. Prefer ValidateAccessToken or ValidateRefreshToken.
 func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
+	keys := s.keys()
+
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		// The method is pinned by WithValidMethods below, which is what closes
+		// algorithm confusion: without it, an attacker signs a token with the
+		// published public key as an HMAC secret and a parser that trusts the
+		// header's alg accepts it.
+		if token.Method.Alg() != keys.Method().Alg() {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
-		return []byte(s.Secret), nil
-	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithExpirationRequired())
+		kid, _ := token.Header["kid"].(string)
+		return keys.VerifyKey(kid)
+	}, jwt.WithValidMethods(keys.ValidMethods()), jwt.WithExpirationRequired())
 
 	if err != nil {
 		return nil, fmt.Errorf("parsing token: %w", err)
@@ -135,7 +149,45 @@ func (s *AuthService) ValidateToken(tokenString string) (*Claims, error) {
 		return nil, fmt.Errorf("invalid token")
 	}
 
+	// Issuer and audience, checked only when this deployment declares them and
+	// only when the token carries them.
+	//
+	// Tolerating a missing claim is what lets these be switched on without
+	// signing everybody out: tokens minted before the change have neither, and
+	// they age out within one refresh lifetime. A token that does carry one
+	// must match, which is the case that matters, because it is how a token
+	// minted for staging is refused by production.
+	if keys.Issuer != "" && claims.Issuer != "" && claims.Issuer != keys.Issuer {
+		return nil, fmt.Errorf("token issued by %q, not %q", claims.Issuer, keys.Issuer)
+	}
+	if keys.Audience != "" && len(claims.Audience) > 0 && !hasAudience(claims.Audience, keys.Audience) {
+		return nil, fmt.Errorf("token is not addressed to %q", keys.Audience)
+	}
+
 	return claims, nil
+}
+
+// hasAudience reports whether want is among the token's audiences. The claim is
+// a list because a token may legitimately address several services at once.
+func hasAudience(audiences jwt.ClaimStrings, want string) bool {
+	for _, a := range audiences {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// keys is the signing configuration, falling back to Secret as an HS256 key.
+//
+// The fallback is what keeps a zero-value AuthService working: the test
+// helpers build one with a Secret and nothing else, and so does any project
+// that has never configured signing.
+func (s *AuthService) keys() *SigningKeys {
+	if s.Keys != nil {
+		return s.Keys
+	}
+	return &SigningKeys{Algorithm: "HS256", secret: []byte(s.Secret)}
 }
 
 // GenerateResetToken creates a random hex token for password resets.
@@ -159,21 +211,40 @@ func (s *AuthService) generateToken(userID, email, role, tokenType, sessionID st
 		return "", 0, fmt.Errorf("generating token id: %w", err)
 	}
 
-	claims := &Claims{
-		UserID:    userID,
-		Email:     email,
-		Role:      role,
-		TokenType: tokenType,
-		SessionID: sessionID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ID:        jti,
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-		},
+	keys := s.keys()
+
+	registered := jwt.RegisteredClaims{
+		ID:        jti,
+		ExpiresAt: jwt.NewNumericDate(expiresAt),
+		IssuedAt:  jwt.NewNumericDate(time.Now()),
+	}
+	// Who minted this and who it is for. Written only when configured, because
+	// a claim nobody checks is noise, and checked only when written, so turning
+	// them on does not invalidate tokens already in circulation.
+	if keys.Issuer != "" {
+		registered.Issuer = keys.Issuer
+	}
+	if keys.Audience != "" {
+		registered.Audience = jwt.ClaimStrings{keys.Audience}
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.Secret))
+	claims := &Claims{
+		UserID:           userID,
+		Email:            email,
+		Role:             role,
+		TokenType:        tokenType,
+		SessionID:        sessionID,
+		RegisteredClaims: registered,
+	}
+
+	token := jwt.NewWithClaims(keys.Method(), claims)
+	// The key id, so a verifier holding several published keys knows which one
+	// to check against. Without it, rotation means trying every key in turn and
+	// a failure is indistinguishable from a forged token.
+	if kid := keys.CurrentKID(); kid != "" {
+		token.Header["kid"] = kid
+	}
+	tokenString, err := token.SignedString(keys.SignKey())
 	if err != nil {
 		return "", 0, err
 	}
@@ -229,6 +300,110 @@ func (s *AuthService) ClearAuthCookies(c *gin.Context) {
 	c.SetCookie("grit_signed_in", "", -1, "/", "", secure, true)
 	c.SetCookie("grit_refresh", "", -1, RefreshCookiePath, "", secure, true)
 	c.SetCookie("grit_refresh", "", -1, legacyRefreshCookiePath, "", secure, true)
+}
+
+// The reads and writes behind signing in, so the handler runs none of its own.
+//
+// They live here rather than in internal/handlers/auth.go because each is a
+// decision about data rather than about HTTP: which columns of a two-factor row
+// are safe to load, what an unknown address answers, when a failure count is
+// cleared. Generated resources were moved onto their services in v3.224 and the
+// framework's own handlers were not, which left the first file a developer
+// opens breaking the rule the generator enforces.
+
+// EnabledTwoFactor returns the account's second factor, or an error when it has
+// none to ask for.
+//
+// Only the id and the method are read. The secret is encrypted when
+// FIELD_ENCRYPTION_KEY is set, and loading it here would let a secret that
+// cannot be decrypted read as "this account has no second factor", which turns
+// a key problem into a silently disabled second factor.
+func (s *AuthService) EnabledTwoFactor(ctx context.Context, userID string) (*models.TwoFactorConfig, error) {
+	var cfg models.TwoFactorConfig
+	if err := s.DB.WithContext(ctx).Select("id", "method").
+		Where("user_id = ? AND enabled = ?", userID, true).First(&cfg).Error; err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// StartPendingTOTP records a half-completed sign-in: the password is right and
+// the second factor is still outstanding.
+func (s *AuthService) StartPendingTOTP(ctx context.Context, pending *models.TOTPPendingToken) error {
+	return s.DB.WithContext(ctx).Create(pending).Error
+}
+
+// UserByEmail is the sign-in lookup.
+//
+// The caller spends a bcrypt comparison whether or not this finds anything, so
+// an address with no account takes the same time as one with a wrong password.
+// Returning the error rather than a nil user keeps that decision at the call
+// site, where the timing is managed.
+func (s *AuthService) UserByEmail(ctx context.Context, email string) (*models.User, error) {
+	var user models.User
+	if err := s.DB.WithContext(ctx).Where("email = ?", email).First(&user).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// UserByID reloads the account behind a refresh token.
+//
+// A refresh token is otherwise valid for its whole lifetime even after the
+// account is deleted or deactivated. Re-reading the row closes that window and
+// lets a role change take effect on the next refresh, which is partial
+// revocation without a server-side token store.
+func (s *AuthService) UserByID(ctx context.Context, id string) (*models.User, error) {
+	var user models.User
+	if err := s.DB.WithContext(ctx).First(&user, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// ClearLoginFailures resets the lockout counters.
+//
+// Called when a sign-in finishes, never when the password alone is accepted:
+// clearing it at the password with a second factor still ahead handed a fresh
+// set of guesses at the code to anybody who knew the password and simply signed
+// in again.
+func (s *AuthService) ClearLoginFailures(ctx context.Context, userID string) error {
+	return s.DB.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
+		Updates(map[string]interface{}{"failed_login_count": 0, "locked_until": nil}).Error
+}
+
+// CountLoginFailure counts one wrong credential against an account and returns
+// the count as the database now holds it.
+//
+// The increment is in SQL, so parallel attempts cannot each read the same number
+// and overwrite one another, and the count is read back for the same reason: the
+// one the caller arrived with is already stale, and it is what a lockout decision
+// is made from. Both the password step and the second factor had their own copy
+// of this, written months apart.
+func (s *AuthService) CountLoginFailure(ctx context.Context, userID string) (int, error) {
+	if err := s.DB.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
+		UpdateColumn("failed_login_count", gorm.Expr("failed_login_count + 1")).Error; err != nil {
+		return 0, err
+	}
+	var fresh models.User
+	if err := s.DB.WithContext(ctx).Select("id", "failed_login_count").
+		First(&fresh, "id = ?", userID).Error; err != nil {
+		return 0, err
+	}
+	return fresh.FailedLoginCount, nil
+}
+
+// LockAccount locks an account until until, and clears the counter and the
+// pending two-factor tokens that are now useless to it.
+//
+// The pending tokens go because each one is a set of guesses at a code: leaving
+// them is the difference between locking an account and pausing it.
+func (s *AuthService) LockAccount(ctx context.Context, userID string, until time.Time) error {
+	if err := s.DB.WithContext(ctx).Model(&models.User{}).Where("id = ?", userID).
+		Updates(map[string]interface{}{"locked_until": until, "failed_login_count": 0}).Error; err != nil {
+		return err
+	}
+	return s.DB.WithContext(ctx).Where("user_id = ?", userID).Delete(&models.TOTPPendingToken{}).Error
 }
 
 // isRequestHTTPS returns true when the request is on HTTPS (directly or

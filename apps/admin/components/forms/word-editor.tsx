@@ -1,7 +1,7 @@
 "use client";
 
-import { useEditor, useEditorState, EditorContent, type Editor } from "@tiptap/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEditor, EditorContent, type Editor } from "@tiptap/react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import { uploadFile } from "@/lib/api-client";
 import { richTextExtensions } from "@/lib/tiptap-extensions";
 import {
@@ -29,8 +29,7 @@ interface WordEditorProps {
 
 // What the toolbar shows. Tiptap 3 no longer re-renders on every transaction,
 // so the toolbar subscribes to exactly these and re-renders when one changes.
-function toolbarState(editor: Editor | null) {
-  if (!editor) return null;
+function toolbarState(editor: Editor) {
   return {
     canUndo: editor.can().undo(),
     canRedo: editor.can().redo(),
@@ -102,8 +101,31 @@ export function WordEditor({ value, onChange, placeholder, onBlur, minHeight, la
     immediatelyRender: false,
   });
 
-  const state = useEditorState({ editor, selector: ({ editor }) => toolbarState(editor) });
-
+  /*
+   * The toolbar re-renders when the editor changes, by subscribing to it.
+   *
+   * Tiptap 3 stopped re-rendering on every transaction and offers
+   * useEditorState to subscribe to just the values a toolbar reads. That hook
+   * subscribes once, with the editor it is first handed, and with
+   * immediatelyRender: false (which Next.js needs, or Tiptap renders on the
+   * server and its DOM never matches the client's) the first one is null. It
+   * does not resubscribe when the real editor arrives, so the selector never
+   * runs and the state stays undefined: the "Loading editor..." gate below
+   * never lifted, with a working editor mounted behind it.
+   *
+   * Eighteen booleans recomputed per transaction is what Tiptap 2 did, and is
+   * not a cost worth a hook that does not fire.
+   */
+  const [, refreshToolbar] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!editor) return;
+    editor.on("transaction", refreshToolbar);
+    editor.on("selectionUpdate", refreshToolbar);
+    return () => {
+      editor.off("transaction", refreshToolbar);
+      editor.off("selectionUpdate", refreshToolbar);
+    };
+  }, [editor]);
   useEffect(() => {
     if (editor && value !== editor.getHTML()) {
       // emitUpdate: false suppresses the onUpdate echo.
@@ -142,13 +164,18 @@ export function WordEditor({ value, onChange, placeholder, onBlur, minHeight, la
     editor?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
   };
 
-  if (!editor || !state) {
+  if (!editor) {
     return (
       <div className="rounded-xl border border-border bg-bg-elevated p-8 text-sm text-text-muted">
         Loading editor...
       </div>
     );
   }
+
+  // Below the gate, so the editor is an Editor and not Editor | null. Computed
+  // above it, every read of it in the toolbar is a possibly-null error that
+  // next dev does not report and next build does.
+  const state = toolbarState(editor);
 
   return (
     <div className={"rounded-xl border bg-bg-elevated shadow-sm overflow-hidden " + (invalid ? "border-danger" : "border-border")}>

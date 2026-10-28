@@ -5,6 +5,8 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+
+	"strings"
 )
 
 // isWailsOrigin reports whether the request came from the Wails desktop
@@ -40,6 +42,53 @@ func isWailsOrigin(origin string) bool {
 //
 // Kept for callers that genuinely have a static list. Anything user-facing
 // should use CORSDynamic, so adding a domain does not need a redeploy.
+// allowedRequestHeaders is what the browser is told the page may send.
+//
+// A header missing from this list is not refused with an error: it is stripped
+// during preflight, so the request never arrives, no handler runs, nothing is
+// logged, and the same call works perfectly under curl. That is the worst shape
+// a bug can have, and it is why this is a list anything can add to rather than
+// a string literal somebody has to remember to edit.
+var allowedRequestHeaders = []string{
+	"Origin",
+	"Content-Type",
+	"Accept",
+	"Authorization",
+	"X-API-Key",
+	"X-CSRF-Token",
+	"Idempotency-Key",
+	"X-Public-IP-Hint",
+}
+
+// allowedRequestHeadersValue is the joined header value, built once.
+var allowedRequestHeadersValue = strings.Join(allowedRequestHeaders, ", ")
+
+// AllowRequestHeader adds a header to that list.
+//
+// Call it from an init() in the file that introduces the header, so the feature
+// and its CORS entry arrive and leave together instead of the second one being
+// a thing to remember. internal/middleware/tenant.go does exactly this for
+// X-Organization-ID, which is why removing the multitenant plugin also removes
+// the header without touching this file.
+//
+// init() only. Package-level variables are initialised before any init() runs,
+// and every init() finishes before main, so by the time a request can read
+// allowedRequestHeadersValue the list is final and nothing synchronises it.
+// Calling this from a handler would be a data race.
+func AllowRequestHeader(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	for _, existing := range allowedRequestHeaders {
+		if strings.EqualFold(existing, name) {
+			return
+		}
+	}
+	allowedRequestHeaders = append(allowedRequestHeaders, name)
+	allowedRequestHeadersValue = strings.Join(allowedRequestHeaders, ", ")
+}
+
 func CORS(allowedOrigins []string) gin.HandlerFunc {
 	return CORSDynamic(func() []string { return allowedOrigins })
 }
@@ -80,7 +129,7 @@ func CORSDynamic(resolve func() []string) gin.HandlerFunc {
 		// is stripped by the browser during preflight: the request fails in
 		// every browser and works perfectly under curl, which is the worst
 		// shape a bug can have.
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, X-API-Key, X-CSRF-Token, Idempotency-Key, X-Public-IP-Hint")
+		c.Header("Access-Control-Allow-Headers", allowedRequestHeadersValue)
 		c.Header("Access-Control-Allow-Credentials", "true")
 		c.Header("Access-Control-Max-Age", "86400")
 

@@ -22,22 +22,22 @@ export default function ErrorPage({
           </svg>
         </div>
         <h2 className="mb-2 text-2xl font-bold text-foreground">Something went wrong</h2>
-        <p className="mb-6 text-muted-foreground">
+        <p className="mb-6 text-text-muted">
           An unexpected error occurred. You can try again or go back.
         </p>
         {error.digest && (
-          <p className="mb-4 text-xs text-muted-foreground/60 font-mono">Error ID: {error.digest}</p>
+          <p className="mb-4 text-xs text-text-muted/60 font-mono">Error ID: {error.digest}</p>
         )}
         <div className="flex gap-3 justify-center">
           <button
             onClick={() => window.history.back()}
-            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-accent/50 transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg border border-border px-4 py-2.5 text-sm font-medium text-foreground hover:bg-bg-hover transition-colors"
           >
             Go Back
           </button>
           <button
             onClick={reset}
-            className="inline-flex items-center gap-2 rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
+            className="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-accent-fg hover:bg-accent-hover transition-colors"
           >
             Try Again
           </button>

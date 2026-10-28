@@ -88,9 +88,9 @@ func Connect(dsn string) (*gorm.DB, error) {
 
 	switch {
 	case strings.HasPrefix(dsn, "sqlite://"):
-		db, err = gorm.Open(sqlite.Open(strings.TrimPrefix(dsn, "sqlite://")), gormCfg)
+		db, err = gorm.Open(sqlite.Open(sqliteDSN(strings.TrimPrefix(dsn, "sqlite://"))), gormCfg)
 	case strings.HasPrefix(dsn, "sqlite:"):
-		db, err = gorm.Open(sqlite.Open(strings.TrimPrefix(dsn, "sqlite:")), gormCfg)
+		db, err = gorm.Open(sqlite.Open(sqliteDSN(strings.TrimPrefix(dsn, "sqlite:"))), gormCfg)
 	case strings.HasPrefix(dsn, "mysql://"), strings.HasPrefix(dsn, "mysql:"):
 		// go-sql-driver wants "user:pass@tcp(host:port)/db", not a URL, so the
 		// scheme is stripped rather than parsed. parseTime is not optional:
@@ -202,6 +202,23 @@ func Connect(dsn string) (*gorm.DB, error) {
 	if maxIdle < 1 || maxIdle > maxOpen {
 		maxIdle = maxOpen
 	}
+
+	// SQLite takes one connection, whatever the numbers above say. It was long
+	// written here that SQLite "ignores most of these", and it does not: a pool
+	// of several connections is several writers competing for one file lock, so
+	// a transaction holding the write lock on one connection and a statement
+	// wanting it on another wait for each other until busy_timeout gives up.
+	// What comes back is "database is locked" on a machine doing almost
+	// nothing: a background worker ticking while a webhook writes was enough to
+	// lose the write, and it reads as a load problem it is not.
+	//
+	// One connection makes that a queue inside the process, which is what
+	// SQLite wants. It is also the only correct setting for :memory:, where a
+	// second connection is a second, empty database.
+	if strings.HasPrefix(dsn, "sqlite:") {
+		maxOpen, maxIdle = 1, 1
+	}
+
 	sqlDB.SetMaxIdleConns(maxIdle)
 	sqlDB.SetMaxOpenConns(maxOpen)
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
@@ -210,6 +227,37 @@ func Connect(dsn string) (*gorm.DB, error) {
 
 	log.Println("Database connected successfully")
 	return db, nil
+}
+
+// sqliteDSN adds the two pragmas a SQLite file needs to survive more than one
+// writer.
+//
+// Without them a second writer fails at once with "database is locked", which
+// is not a load problem: a background worker ticking while a webhook writes is
+// enough, and the error surfaces as a failed request nobody can reproduce by
+// hand. busy_timeout makes a writer wait its turn instead of giving up, and
+// WAL lets reads carry on while one write is in flight.
+//
+// Anything the caller set is left alone, and :memory: gets neither: there is
+// no file to journal and a memory database is one connection's own.
+func sqliteDSN(path string) string {
+	if path == "" || strings.Contains(path, ":memory:") || strings.Contains(path, "mode=memory") {
+		return path
+	}
+	if !strings.Contains(path, "busy_timeout") {
+		path += pragmaJoin(path) + "_pragma=busy_timeout(5000)"
+	}
+	if !strings.Contains(path, "journal_mode") {
+		path += pragmaJoin(path) + "_pragma=journal_mode(WAL)"
+	}
+	return path
+}
+
+func pragmaJoin(path string) string {
+	if strings.Contains(path, "?") {
+		return "&"
+	}
+	return "?"
 }
 
 // getEnvInt reads a whole-number env var. A malformed value falls back rather

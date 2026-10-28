@@ -2,12 +2,16 @@ package services
 
 import (
 	"context"
+	// Grid rows arrive as maps and are decoded into the model here, through
+	// the same JSON path a single create takes.
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"whatsapp/apps/api/internal/authz"
 	"whatsapp/apps/api/internal/concurrency"
 	"whatsapp/apps/api/internal/files"
 	"whatsapp/apps/api/internal/models"
@@ -39,6 +43,13 @@ var messageListConfig = paginate.Config{
 	Sortable:   map[string]bool{"id": true, "created_at": true, "body": true, "kind": true},
 	Filterable: map[string]bool{"id": true, "conversation_id": true, "sender_id": true, "body": true, "kind": true, "attachment": true},
 }
+
+// expandMessageEmbedded rewrites the columns a map update cannot carry.
+//
+// Nothing to do: Message has no embedded column. It exists so that every
+// path writing through a map calls the same thing, and adding a money field
+// later is a change here rather than at each of them.
+func expandMessageEmbedded(updates map[string]interface{}) {}
 
 // writableMessage is every column Patch and Bulk may write. id, the
 // timestamps and the version are the framework's, and are dropped.
@@ -168,14 +179,26 @@ func (s *MessageService) GetByID(ctx context.Context, id string) (*models.Messag
 	if err := s.db(ctx).Preload("Conversation").Preload("Sender").First(&item, "id = ?", id).Error; err != nil {
 		return nil, err
 	}
+	if d := authz.Inspect(ctx, "messages.read", &item); !d.Allowed() {
+		return nil, authz.Denied("messages.read", d)
+	}
 	return &item, nil
 }
 
 // load reads the row a write is about to change, without its relations.
-func (s *MessageService) load(ctx context.Context, id string) (*models.Message, error) {
+//
+// ability is what the caller is about to do, "update" or "delete", so a
+// policy can refuse one without refusing the other.
+func (s *MessageService) load(ctx context.Context, id, ability string) (*models.Message, error) {
 	var item models.Message
 	if err := s.db(ctx).First(&item, "id = ?", id).Error; err != nil {
 		return nil, err
+	}
+	// A policy rule narrows this further than the route's permission did.
+	// None defined means no narrowing, which is how the project behaved
+	// before it had policies. See internal/policies.
+	if d := authz.Inspect(ctx, "messages."+ability, &item); !d.Allowed() {
+		return nil, authz.Denied("messages."+ability, d)
 	}
 	return &item, nil
 }
@@ -214,11 +237,12 @@ func (s *MessageService) Create(ctx context.Context, item *models.Message) error
 // if the row is still at that version, and otherwise returns an
 // *concurrency.ErrConflict naming the version it is at.
 func (s *MessageService) Update(ctx context.Context, id string, updates map[string]interface{}, pre *concurrency.Precondition) (*models.Message, error) {
-	item, err := s.load(ctx, id)
+	item, err := s.load(ctx, id, "update")
 	if err != nil {
 		return nil, err
 	}
 	db := s.db(ctx)
+	expandMessageEmbedded(updates)
 	oldItem := *item // the files before the write, to find the ones it replaced
 	written := s.write(db).Model(item).Scopes(pre.Scope).Updates(updates)
 	if err := written.Error; err != nil {
@@ -248,7 +272,7 @@ func (s *MessageService) Update(ctx context.Context, id string, updates map[stri
 // is. Keys that are not writable columns are dropped. It returns the row and
 // the columns it wrote.
 func (s *MessageService) Patch(ctx context.Context, id string, body map[string]interface{}, pre *concurrency.Precondition) (*models.Message, map[string]interface{}, error) {
-	item, err := s.load(ctx, id)
+	item, err := s.load(ctx, id, "update")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -265,6 +289,7 @@ func (s *MessageService) Patch(ctx context.Context, id string, body map[string]i
 		return nil, nil, respond.Rule("No writable fields in request body")
 	}
 
+	expandMessageEmbedded(updates)
 	if len(updates) > 0 {
 		written := s.write(db).Model(item).Scopes(pre.Scope).Updates(updates)
 		if err := written.Error; err != nil {
@@ -287,7 +312,7 @@ func (s *MessageService) Patch(ctx context.Context, id string, body map[string]i
 
 // Delete soft-deletes one message and returns it as it was.
 func (s *MessageService) Delete(ctx context.Context, id string) (*models.Message, error) {
-	item, err := s.load(ctx, id)
+	item, err := s.load(ctx, id, "delete")
 	if err != nil {
 		return nil, err
 	}
@@ -356,6 +381,7 @@ func (s *MessageService) Bulk(ctx context.Context, action string, ids []string, 
 			return tx.Model(&models.Message{}).Where("id IN ?", result.IDs).
 				Update("archived_at", nil).Error
 		case "patch":
+			expandMessageEmbedded(result.Updates)
 			return tx.Model(&models.Message{}).Where("id IN ?", result.IDs).
 				Updates(result.Updates).Error
 		}
@@ -365,4 +391,177 @@ func (s *MessageService) Bulk(ctx context.Context, action string, ids []string, 
 		return MessageBulkResult{}, err
 	}
 	return result, nil
+}
+
+// MessageRowError is one row of a grid that could not be saved, and why.
+//
+// The index is the row's position in the request, not its id: a create has no
+// id yet, and the grid needs to put the message back on the line the operator
+// is looking at.
+type MessageRowError struct {
+	Index   int    `json:"index"`
+	Message string `json:"message"`
+}
+
+// MessageGridEdit is one row's changes: the id, and only the columns that
+// changed. Sending the whole row would make every save a write to every column,
+// which loses a concurrent edit to a column this operator never touched.
+type MessageGridEdit struct {
+	ID    string                 `json:"id"`
+	Patch map[string]interface{} `json:"patch"`
+}
+
+// BulkEdit writes a different patch to each row, in one transaction.
+//
+// Bulk(action: "patch") writes ONE set of values to every selected row, which
+// is the right shape for "set the status of these forty" and the wrong one for
+// a spreadsheet, where the point is that each row differs. Hence two methods
+// rather than one with a mode.
+//
+// All of it lands or none of it does. A grid where rows 1 to 9 saved and row 10
+// did not is one the operator has to reconcile by hand against a list of
+// indexes, and they will not.
+func (s *MessageService) BulkEdit(ctx context.Context, edits []MessageGridEdit) ([]string, []MessageRowError, error) {
+	var rowErrors []MessageRowError
+	type write struct {
+		id      string
+		updates map[string]interface{}
+	}
+	writes := make([]write, 0, len(edits))
+
+	for i, edit := range edits {
+		if edit.ID == "" {
+			rowErrors = append(rowErrors, MessageRowError{Index: i, Message: "no id"})
+			continue
+		}
+		// The same whitelist Patch uses. Framework-owned columns are dropped
+		// rather than refused, so a grid sending a whole row is not wrong.
+		updates := map[string]interface{}{}
+		for k, v := range edit.Patch {
+			if writableMessage[k] {
+				updates[k] = v
+			}
+		}
+		if len(updates) == 0 {
+			// Nothing writable changed. Not an error: a grid sends every row
+			// the operator touched, and touching a cell and putting it back is
+			// a thing people do.
+			continue
+		}
+		expandMessageEmbedded(updates)
+		writes = append(writes, write{id: edit.ID, updates: updates})
+	}
+	if len(rowErrors) > 0 {
+		return nil, rowErrors, nil
+	}
+	if len(writes) == 0 {
+		return nil, nil, nil
+	}
+
+	// Only rows this caller may touch. An owned resource scopes to the caller,
+	// so a guessed id in the grid changes nothing rather than somebody else's
+	// row.
+	ids := make([]string, 0, len(writes))
+	for _, w := range writes {
+		ids = append(ids, w.id)
+	}
+	var allowed []models.Message
+	if err := s.db(ctx).Model(&models.Message{}).Where("id IN ?", ids).Find(&allowed).Error; err != nil {
+		return nil, nil, fmt.Errorf("loading messages to edit: %w", err)
+	}
+	exists := make(map[string]bool, len(allowed))
+	for _, row := range allowed {
+		exists[row.ID] = true
+	}
+	for i, w := range writes {
+		if !exists[w.id] {
+			rowErrors = append(rowErrors, MessageRowError{Index: i, Message: "no such message"})
+		}
+	}
+	if len(rowErrors) > 0 {
+		return nil, rowErrors, nil
+	}
+
+	saved := make([]string, 0, len(writes))
+	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, w := range writes {
+			// Row by row, because each has its own values. One statement per
+			// row inside one transaction: the round trips are the cost of the
+			// feature, and the atomicity is the point of it.
+			if err := tx.Model(&models.Message{}).Where("id = ?", w.id).Updates(w.updates).Error; err != nil {
+				return err
+			}
+			saved = append(saved, w.id)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return saved, nil, nil
+}
+
+// BulkCreate inserts many messages in one transaction.
+//
+// Every row is decoded before anything is written, so a spreadsheet with a
+// mistake on row 7 is refused whole and reported against row 7, rather than
+// creating six rows and stopping.
+func (s *MessageService) BulkCreate(ctx context.Context, rows []map[string]interface{}) ([]models.Message, []MessageRowError, error) {
+	var rowErrors []MessageRowError
+	items := make([]models.Message, 0, len(rows))
+
+	for i, row := range rows {
+		// Through the same JSON path a single create takes, so the model's own
+		// tags and hooks apply identically. A second way into the table is a
+		// second set of rules to keep in step.
+		encoded, err := json.Marshal(row)
+		if err != nil {
+			rowErrors = append(rowErrors, MessageRowError{Index: i, Message: "could not be read"})
+			continue
+		}
+		var item models.Message
+		if err := json.Unmarshal(encoded, &item); err != nil {
+			rowErrors = append(rowErrors, MessageRowError{Index: i, Message: err.Error()})
+			continue
+		}
+		// Never from the request: these are the database's to set.
+		item.ID = ""
+		item.CreatedAt = time.Time{}
+		item.UpdatedAt = time.Time{}
+		// The binding: tags, which encoding/json does not know about.
+		//
+		// A single create is bound by gin, so required and min are enforced
+		// before the handler runs. This path decodes the row itself, and
+		// without this line the grid could insert a row the form would then
+		// refuse to save: a message with no category went in, and editing it
+		// answered "Category is required" with no way to get at the row.
+		if err := respond.ValidateStruct(&item); err != nil {
+			rowErrors = append(rowErrors, MessageRowError{Index: i, Message: err.Error()})
+			continue
+		}
+		items = append(items, item)
+	}
+	if len(rowErrors) > 0 {
+		return nil, rowErrors, nil
+	}
+	if len(items) == 0 {
+		return nil, nil, nil
+	}
+
+	err := s.db(ctx).Transaction(func(tx *gorm.DB) error {
+		// One at a time rather than CreateInBatches, because the model's
+		// BeforeCreate hooks (the uuid, the slug, a sequence number) have to
+		// run per row, and a batch insert of rows whose slugs collide is a
+		// constraint violation with no row number in it.
+		for i := range items {
+			if err := tx.Create(&items[i]).Error; err != nil {
+				return fmt.Errorf("row %d: %w", i+1, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return items, nil, nil
 }

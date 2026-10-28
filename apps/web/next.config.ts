@@ -42,7 +42,9 @@ function toOrigin(value: string): string {
   }
 }
 
-const API_ORIGIN = toOrigin(process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080");
+const API_ORIGIN = toOrigin(
+  process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || "http://localhost:8080",
+);
 // The realtime socket is the API origin over ws:/wss:. CSP matches schemes
 // exactly, so the https: origin above does not cover it, and without this the
 // browser blocks every live update in production.
@@ -54,6 +56,15 @@ const API_WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
 // NEXT_PUBLIC_STORAGE_URL to your S3/R2/B2 public origin
 // (e.g. https://cdn.example.com or https://<bucket>.s3.<region>.amazonaws.com).
 const STORAGE_ORIGIN = toOrigin(process.env.NEXT_PUBLIC_STORAGE_URL || "http://localhost:9002");
+// Where presigned uploads are actually sent, when that is not where the files
+// are read back from. A CSP source is an origin, so listing only the read origin
+// blocks the PUT: the API signs a perfectly good URL and the browser refuses it,
+// which shows up as a console violation and never as an HTTP status. A managed
+// bucket does this by default, serving reads from its own CDN host and signing
+// writes for the underlying S3 endpoint. Unset, it costs nothing.
+const STORAGE_UPLOAD_ORIGIN = process.env.NEXT_PUBLIC_STORAGE_UPLOAD_URL
+  ? " " + toOrigin(process.env.NEXT_PUBLIC_STORAGE_UPLOAD_URL)
+  : "";
 const isDev = process.env.NODE_ENV !== "production";
 // Hosts images load from besides this site, the API and storage: the avatars
 // Google and GitHub sign-in save, plus NEXT_PUBLIC_IMAGE_ORIGINS (comma-separated
@@ -65,22 +76,37 @@ const IMAGE_ORIGINS = ["https://lh3.googleusercontent.com", "https://avatars.git
   .concat(isDev ? ["https://picsum.photos"] : [])
   .join(" ");
 
+// Third-party origins a plugin needs, as [directive, origin]. Each is
+// appended to its directive below. grit plugin add stripe puts Stripe.js here,
+// and grit plugin remove takes it out again.
+const pluginOrigins: [string, string][] = [
+  // grit:csp-origins
+];
+
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline'" + (isDev ? " 'unsafe-eval'" : ""),
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: " + API_ORIGIN + " " + STORAGE_ORIGIN + " " + IMAGE_ORIGINS,
+  "media-src 'self' blob: " + API_ORIGIN + " " + STORAGE_ORIGIN,
   "font-src 'self' data:",
   // ws:/wss: keep the dev overlay + HMR socket working. api.ipify.org is the
   // public-IP hint the API client fetches so local audit records show a real
   // address instead of ::1 — dev only, and it must be allowed here or the
   // browser logs a CSP violation on every page load.
-  "connect-src 'self' " + API_ORIGIN + " " + API_WS_ORIGIN + " " + STORAGE_ORIGIN + (isDev ? " ws: wss: https://api.ipify.org" : ""),
+  "connect-src 'self' " + API_ORIGIN + " " + API_WS_ORIGIN + " " + STORAGE_ORIGIN + STORAGE_UPLOAD_ORIGIN + (isDev ? " ws: wss: https://api.ipify.org" : ""),
+  "frame-src 'self'",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",
-].join("; ");
+]
+  .map((directive) => {
+    const name = directive.split(" ")[0];
+    const extra = pluginOrigins.filter(([d]) => d === name).map(([, origin]) => origin);
+    return extra.length > 0 ? directive + " " + extra.join(" ") : directive;
+  })
+  .join("; ");
 
 // Hosts next/image is allowed to fetch from. Same source as the CSP above:
 // stored uploads come from the storage origin, and picsum.photos is where
@@ -141,6 +167,12 @@ const nextConfig: NextConfig = {
   // CDN is one env var rather than two places that drift.
   images: {
     remotePatterns: nextImageHosts,
+    // Next refuses an upstream image whose host resolves to a private IP,
+    // which in development is all of them: the API and MinIO both live on
+    // localhost. Without this the optimizer answers 400 and the page shows
+    // alt text, with the reason only in the terminal. Never in production,
+    // where storage is a real origin and this guard is worth having.
+    dangerouslyAllowLocalIP: isDev,
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

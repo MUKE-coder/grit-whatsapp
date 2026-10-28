@@ -5,11 +5,13 @@ import (
 	"crypto/rand"
 	"crypto/sha1" // #nosec G505 -- RFC 6238 TOTP is HMAC-SHA1, and every authenticator app requires it
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"math"
+	"math/big"
 	"net/url"
 	"strings"
 	"time"
@@ -26,6 +28,14 @@ const (
 	Period = 30
 	// Window is the number of periods to check before/after current (clock skew tolerance).
 	Window = 1
+	// SkewSearch is how far out a code is searched when enrolling, and how far
+	// a refused code is searched to explain the refusal. Five minutes either
+	// way covers the drift a phone or a virtual machine accumulates; beyond
+	// that the code is simply wrong.
+	//
+	// This is NOT the window a sign-in accepts. Sign-in stays at Window, one
+	// step either side of the device's own recorded offset.
+	SkewSearch = 10
 	// BackupCodeLength is the character length of each backup code.
 	BackupCodeLength = 8
 	// BackupCodeCount is the default number of backup codes generated.
@@ -68,6 +78,56 @@ func GenerateURI(secret, email, issuer string) string {
 	return fmt.Sprintf("otpauth://totp/%s?%s", label, v.Encode())
 }
 
+// EnrolStep finds the step a code belongs to, searching SkewSearch either way.
+//
+// Only for enrolment, where the person is already signed in, holds the secret
+// they were just shown, and is proving they can read their own authenticator.
+// The offset it returns is what makes the tight sign-in window work afterwards
+// for a device whose clock nobody can fix.
+func EnrolStep(secret, code string) (int64, bool, error) {
+	counter := time.Now().Unix() / Period
+	matched, found := int64(0), false
+	for i := -int64(SkewSearch); i <= int64(SkewSearch); i++ {
+		expected, err := generateCode(secret, counter+i)
+		if err != nil {
+			return 0, false, err
+		}
+		if hmac.Equal([]byte(expected), []byte(code)) {
+			matched, found = counter+i, true
+		}
+	}
+	return matched, found, nil
+}
+
+// SkewSeconds reports how far a code's time step is from this server's.
+//
+// Only called when a code has already been refused. A code from an
+// authenticator whose clock has drifted is indistinguishable from a wrong code
+// unless somebody measures it, and "Invalid verification code" sends people to
+// re-scan a QR that was never the problem. Drift is the single most common
+// reason a correct app is rejected, and it is the one thing the server can
+// work out on the user's behalf.
+//
+// Returns the offset in seconds and whether the code matched at all within
+// SkewSearch steps. A match here is NOT an acceptance: the caller still
+// refuses the code. It only changes what the refusal says.
+func SkewSeconds(secret, code string) (int, bool) {
+	counter := time.Now().Unix() / Period
+	for i := -int64(SkewSearch); i <= int64(SkewSearch); i++ {
+		if i >= -int64(Window) && i <= int64(Window) {
+			continue // already tried and refused by ValidateCodeStep
+		}
+		expected, err := generateCode(secret, counter+i)
+		if err != nil {
+			return 0, false
+		}
+		if hmac.Equal([]byte(expected), []byte(code)) {
+			return int(i * Period), true
+		}
+	}
+	return 0, false
+}
+
 // ValidateCode checks if the given TOTP code is valid for the secret.
 // Accepts codes within ±Window periods for clock skew tolerance.
 func ValidateCode(secret, code string) (bool, error) {
@@ -80,7 +140,18 @@ func ValidateCode(secret, code string) (bool, error) {
 // one used, because a code is otherwise good for its whole window, and anyone
 // who saw it could use it again.
 func ValidateCodeStep(secret, code string) (int64, bool, error) {
-	counter := time.Now().Unix() / Period
+	return ValidateCodeOffset(secret, code, 0)
+}
+
+// ValidateCodeOffset is ValidateCodeStep for a device whose clock is known to
+// be offset steps away from this server's.
+//
+// The window is unchanged: one step either side, of the device's time rather
+// than the server's. A device that was 60 seconds behind at enrolment is not
+// given a wider window, it is given the right one, which is the difference
+// between accommodating a wrong clock and accepting older codes from everybody.
+func ValidateCodeOffset(secret, code string, offset int64) (int64, bool, error) {
+	counter := time.Now().Unix()/Period + offset
 	matched, found := int64(0), false
 	for i := -int64(Window); i <= int64(Window); i++ {
 		expected, err := generateCode(secret, counter+i)
@@ -170,6 +241,34 @@ func GeneratePendingToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// GenerateEmailCode returns the six digits that go in the email.
+//
+// crypto/rand, not math/rand: this is the whole second factor, and a code an
+// attacker can predict from the clock is not one. Six digits with five attempts
+// and a five-minute life is a one-in-two-hundred-thousand guess.
+func GenerateEmailCode() (string, error) {
+	max := big.NewInt(1000000)
+	n, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%06d", n.Int64()), nil
+}
+
+// EmailCodeMatches compares a typed code with the stored hash, in constant
+// time, so the comparison cannot be timed a digit at a time.
+func EmailCodeMatches(hash, code string) bool {
+	if hash == "" {
+		return false
+	}
+	want, err := hex.DecodeString(hash)
+	if err != nil {
+		return false
+	}
+	got := sha256.Sum256([]byte(strings.TrimSpace(code)))
+	return subtle.ConstantTimeCompare(want, got[:]) == 1
 }
 
 // HashToken returns the SHA-256 hash of a token (for DB storage).

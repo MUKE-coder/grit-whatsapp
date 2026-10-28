@@ -8,7 +8,7 @@ import { SYSTEM_NAV, INTERNAL_ICON } from "@/components/chrome/CollapsibleSideba
 import {
   Activity, Bell, Calendar, Database, FileText, Mail,
   MessageSquare, Shield, ShieldCheck, TrendingUp, Upload, Link as LinkIcon,
-  UserCheck, Settings, LayoutGrid, KeyRound,
+  UserCheck, Settings, LayoutGrid, KeyRound, Workflow, Server, Trash2,
 } from "@/lib/icons";
 
 // Every operational surface is grouped under one of these tabs. The whole
@@ -46,12 +46,16 @@ interface SystemTile {
 const TILES: SystemTile[] = [
   // ── Operations ──────────────────────────────────────────────────────────
   { href: "/system/health",        category: "Operations", title: "System Health",   description: "Real-time infrastructure status — Postgres, Redis, API, jobs, email.",    icon: <Activity className="h-5 w-5" /> },
-  { href: "/system/performance",   category: "Operations", title: "Performance",     description: "Four Google SRE golden signals — latency, traffic, errors, saturation.", icon: <TrendingUp className="h-5 w-5" /> },
-  { href: "/system/observability", category: "Operations", title: "Observability",   description: "Pulse summary — latency, SLOs, top N+1, runtime.",                        icon: <TrendingUp className="h-5 w-5" /> },
+  { href: "/system/deleted-accounts", category: "Security & Access", title: "Deleted accounts",  description: "Accounts somebody closed. Restore one, or remove it for good.", icon: <UserCheck className="h-5 w-5" /> },
+  { href: "/system/trash",         category: "Data & Files", title: "Trash",                description: "Deleted records, restorable for 30 days before they go for good.", icon: <Trash2 className="h-5 w-5" /> },
+  { href: "/system/performance",   category: "Operations", title: "Operations",      description: "Latency, traffic, errors, saturation, slow routes and scaling readiness.", icon: <TrendingUp className="h-5 w-5" /> },
   { href: "/system/jobs",          category: "Operations", title: "Background Jobs",  description: "Queue depth, in-flight workers, dead-letter queue.",                      icon: <Database className="h-5 w-5" /> , module: "jobs" },
+  { href: "/system/sagas",         category: "Operations", title: "Sagas",           description: "Multi-step processes, and the ones whose undo could not be completed.", icon: <Workflow className="h-5 w-5" /> },
+  { href: "/system/routes",        category: "Operations", title: "Routes",          description: "Every endpoint this API serves, searchable, with a curl for each.",     icon: <Server className="h-5 w-5" /> },
   { href: "/system/cron",          category: "Operations", title: "Cron Schedules",  description: "Recurring jobs, next-run times, run history.",                            icon: <Calendar className="h-5 w-5" /> , module: "cron" },
   { href: "/system/activity",      category: "Operations", title: "User Activity",   description: "Auth events, writes, operator actions with IP + severity.",               icon: <Activity className="h-5 w-5" /> , module: "audit" },
   // ── Security & Access ───────────────────────────────────────────────────
+  { href: "/account",               category: "Security & Access", title: "Account",             description: "Your password, two-factor, passkeys and the devices you are signed in on.",  icon: <UserCheck className="h-5 w-5" /> },
   { href: "/system/security",       category: "Security & Access", title: "Security",            description: "Sentinel summary — banned IPs, rate-limit pressure, recent threats.",       icon: <Shield className="h-5 w-5" /> },
   { href: "/system/roles",          category: "Security & Access", title: "Roles & permissions", description: "Define what each role can see and do, and assign roles to users.",           icon: <ShieldCheck className="h-5 w-5" /> },
   { href: "/system/access-reviews", category: "Security & Access", title: "Access Reviews",      description: "Point-in-time snapshots of who holds which role — for audits and attestations.", icon: <UserCheck className="h-5 w-5" /> },

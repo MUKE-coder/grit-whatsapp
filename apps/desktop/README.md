@@ -7,7 +7,7 @@ Go API (over HTTP) as the web app, admin panel, and mobile app in this monorepo.
 
 - Go 1.24+
 - pnpm 8+
-- [Wails CLI](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@latest`
+- [Wails CLI](https://wails.io/docs/gettingstarted/installation): `go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0`
 
 ## Development
 

@@ -21,6 +21,7 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "@/lib/auth";
 import { PressableScale } from "@/components/ui/pressable-scale";
 import { Image } from "expo-image";
+import { APP_INITIAL } from "@/lib/brand";
 import { useTheme } from "@/lib/theme";
 
 const loginSchema = z.object({
@@ -159,7 +160,7 @@ export default function LoginScreen() {
                       className={
                         "h-5 w-5 rounded border items-center justify-center mr-2 " +
                         (trustDevice
-                          ? "bg-[#6c5ce7] border-[#6c5ce7]"
+                          ? "bg-accent border-accent"
                           : "border-[#D1D5DB] dark:border-[#2a2a3a]")
                       }
                     >
@@ -174,7 +175,7 @@ export default function LoginScreen() {
                 <Pressable
                   onPress={onVerify}
                   disabled={loading || code.trim().length < (useBackup ? 8 : 6)}
-                  className="mt-6 rounded-2xl bg-[#6c5ce7] py-4 items-center"
+                  className="mt-6 rounded-2xl bg-accent py-4 items-center"
                   style={{ opacity: loading || code.trim().length < (useBackup ? 8 : 6) ? 0.5 : 1 }}
                 >
                   <Text className="text-white font-semibold text-base">
@@ -184,7 +185,7 @@ export default function LoginScreen() {
 
                 <View className="flex-row items-center justify-between mt-5">
                   <Pressable onPress={() => { setUseBackup(!useBackup); setCode(""); }}>
-                    <Text className="text-[#6c5ce7] font-medium">
+                    <Text className="text-accent font-medium">
                       {useBackup ? "Use your app" : "Use a backup code"}
                     </Text>
                   </Pressable>
@@ -229,7 +230,7 @@ export default function LoginScreen() {
               entering={FadeInUp.duration(500)}
               className="rounded-[28px] bg-white dark:bg-[#111118] border border-[#E5E7EB] dark:border-[#1f1f2b] overflow-hidden"
               style={{
-                shadowColor: "#6c5ce7",
+                shadowColor: palette.accent,
                 shadowOffset: { width: 0, height: 18 },
                 shadowOpacity: 0.18,
                 shadowRadius: 32,
@@ -253,11 +254,31 @@ export default function LoginScreen() {
                       shadowRadius: 22,
                     }}
                   >
-                    <Image
-                      source={require("../../assets/icon.png")}
-                      style={{ width: 76, height: 76, borderRadius: 20 }}
-                      contentFit="contain"
-                    />
+                    {/* The project's own initial, in its own accent colour.
+                        This used to render assets/icon.png, which every
+                        scaffold shipped as the Grit logo, so an app showed
+                        somebody else's brand on its sign-in screen. */}
+                    <View
+                      style={{
+                        width: 76,
+                        height: 76,
+                        borderRadius: 20,
+                        backgroundColor: palette.accent,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: palette.accentForeground,
+                          fontSize: 38,
+                          fontWeight: "700",
+                          lineHeight: 44,
+                        }}
+                      >
+                        {APP_INITIAL}
+                      </Text>
+                    </View>
                   </View>
                   <Text className="text-[28px] font-bold text-[#0F1018] dark:text-white tracking-tight">
                     Welcome back
@@ -352,7 +373,7 @@ export default function LoginScreen() {
                           <Ionicons
                             name={showPassword ? "eye-off-outline" : "eye-outline"}
                             size={19}
-                            color={showPassword ? "#6c5ce7" : "#606078"}
+                            color={showPassword ? palette.accent : palette.inputIcon}
                           />
                         </Pressable>
                       </View>
@@ -372,7 +393,7 @@ export default function LoginScreen() {
                   pressScale={0.97}
                   className="overflow-hidden rounded-full"
                   style={{
-                    shadowColor: "#6c5ce7",
+                    shadowColor: palette.accent,
                     shadowOffset: { width: 0, height: 10 },
                     shadowOpacity: 0.4,
                     shadowRadius: 18,
@@ -380,7 +401,7 @@ export default function LoginScreen() {
                   }}
                 >
                   <LinearGradient
-                    colors={["#7c6cf7", "#6c5ce7"]}
+                    colors={[palette.accentHover, palette.accent]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={{ height: 54, flexDirection: "row", alignItems: "center", justifyContent: "center" }}
@@ -436,7 +457,7 @@ export default function LoginScreen() {
                 <View className="flex-row justify-center mt-6">
                   <Text className="text-[#6B7280] dark:text-[#9090a8] text-[13.5px]">Don't have an account? </Text>
                   <Link href="/(auth)/register">
-                    <Text className="text-[#6c5ce7] font-semibold text-[13.5px]">Sign up</Text>
+                    <Text className="text-accent font-semibold text-[13.5px]">Sign up</Text>
                   </Link>
                 </View>
               </View>

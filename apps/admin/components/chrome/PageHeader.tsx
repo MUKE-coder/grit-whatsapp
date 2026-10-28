@@ -8,7 +8,7 @@ import { RefreshCw, Search, ArrowLeft } from "@/lib/icons";
 import { DarkModeToggle } from "./DarkModeToggle";
 import { UserMenu } from "./UserMenu";
 import { NotificationBell } from "./NotificationBell";
-import { StatCards, type StatCard } from "./StatCards";
+import { StatCards, type StatCard, type StatFilter } from "./StatCards";
 import { inputClasses } from "@/components/ui/input";
 
 // Queries that belong to the layout rather than to any page: the signed-in
@@ -39,6 +39,20 @@ interface PageHeaderProps {
   backLabel?: string;
   /** Stat cards shown under the header, e.g. a resource page's totals. */
   stats?: StatCard[];
+  /**
+   * Given, a card that stands for a subset becomes a button and this is
+   * called with what it counted. Left out, every card stays a plain div.
+   */
+  onStatFilter?: (filter: StatFilter) => void;
+  /** Whether the table is currently narrowed to that card. */
+  isStatFilterActive?: (filter: StatFilter) => boolean;
+  /**
+   * The collapsible insights panel, under the cards.
+   *
+   * A slot rather than a prop of its own, because the panel needs the page's
+   * filters and the header has no business knowing what those are.
+   */
+  insights?: ReactNode;
 }
 
 /**
@@ -60,6 +74,9 @@ export function PageHeader({
   backHref,
   backLabel,
   stats,
+  onStatFilter,
+  isStatFilterActive,
+  insights,
 }: PageHeaderProps) {
   const queryClient = useQueryClient();
   const pathname = usePathname();
@@ -103,7 +120,7 @@ export function PageHeader({
         long page content scrolls behind it. -mx-4 md:-mx-8 cancels the
         main's px-* padding so the bg + border stretch to the edges, and
         px-* inside brings the content back inside the original gutter. */}
-    <header className="sticky top-0 z-20 -mx-4 mb-6 border-b border-border bg-bg-primary/90 backdrop-blur supports-[backdrop-filter]:bg-bg-primary/75 md:-mx-8">
+    <header className="sticky top-0 z-20 -mx-4 mb-6 border-b border-border bg-background/90 backdrop-blur supports-[backdrop-filter]:bg-background/75 md:-mx-8">
       <div className="flex flex-col gap-4 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-8">
         {/* Title block — min-w-0 + flex-shrink lets the title wrap
             cleanly when long subtitles share the row with action chrome. */}
@@ -156,7 +173,10 @@ export function PageHeader({
       </div>
     </header>
     {/* The cards are content, not chrome: they scroll away under the header. */}
-    {stats && stats.length > 0 && <StatCards stats={stats} />}
+    {stats && stats.length > 0 && (
+      <StatCards stats={stats} onFilter={onStatFilter} isFilterActive={isStatFilterActive} />
+    )}
+    {insights}
     </>
   );
 }

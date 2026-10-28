@@ -4,8 +4,9 @@ import { Suspense } from "react";
 import dynamic from "next/dynamic";
 import { useT } from "@/lib/i18n";
 import { useForm, Controller, useWatch, type FieldErrors } from "react-hook-form";
+import { useUnsavedGuard, UnsavedBadge } from "@/components/forms/unsaved-guard";
 import type { FieldDefinition, FormDefinition } from "@/lib/resource";
-import { displayFormat, displayValue, isDisplayOnly, writableValues } from "@/lib/form-values";
+import { displayFormat, displayValue, isDisplayOnly, isRequired, isVisible, writableValues } from "@/lib/form-values";
 import { renderCell } from "@/components/tables/cell-renderers";
 import { TextField } from "./fields/text-field";
 import { TextareaField } from "./fields/textarea-field";
@@ -93,19 +94,25 @@ export function FormBuilder({
     control,
     handleSubmit,
     getValues,
-    formState: { errors },
+    formState: { errors, isDirty },
   } = useForm({
     defaultValues: buildDefaults(formDef.fields, defaultValues),
   });
 
+  // Not while it is being submitted: the save is a navigation of its own on a
+  // page form, and asking "leave and lose them?" about the save itself is how
+  // a guard teaches people to click through it without reading.
+  useUnsavedGuard(isDirty && !isSubmitting);
+
   const isTwoColumn = formDef.layout === "two-column";
+  const visibleFields = useConditionalFields(formDef.fields, control);
 
   return (
     <form onSubmit={handleSubmit((data) => onSubmit(writableValues(formDef.fields, data)))} className="space-y-6">
       <div
         className={`grid gap-4 ${isTwoColumn ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1"}`}
       >
-        {formDef.fields.map((field) => (
+        {visibleFields.map((field) => (
           <div
             key={field.key}
             className={field.colSpan === 2 && isTwoColumn ? "sm:col-span-2" : ""}
@@ -121,6 +128,7 @@ export function FormBuilder({
       </div>
 
       <div className="flex items-center justify-end gap-3 pt-4 border-t border-border">
+        <UnsavedBadge dirty={isDirty && !isSubmitting} />
         <Button variant="outline" onClick={onCancel}>
           {t("form.cancel", "Cancel")}
         </Button>
@@ -161,6 +169,35 @@ function DisplayOnlyField({
       {field.description && <p className="text-xs text-text-muted">{field.description}</p>}
     </div>
   );
+}
+
+/**
+ * The fields a form shows right now, with the required mark each one carries
+ * right now.
+ *
+ * One subscription for the whole form rather than one per field, and none at
+ * all when no field in this form has a condition: useWatch re-renders on every
+ * keystroke, and a form of thirty inputs should not pay for a feature it does
+ * not use.
+ */
+export function useConditionalFields(
+  fields: FieldDefinition[],
+  control: ReturnType<typeof useForm>["control"],
+): FieldDefinition[] {
+  const conditional = fields.some((f) => f.visibleWhen || f.requiredWhen);
+  const watched = useWatch({ control, disabled: !conditional }) as
+    | Record<string, unknown>
+    | undefined;
+
+  if (!conditional) return fields;
+  const values = watched ?? {};
+
+  return fields
+    .filter((field) => isVisible(field, values))
+    .map((field) => {
+      const required = isRequired(field, values);
+      return required === Boolean(field.required) ? field : { ...field, required };
+    });
 }
 
 export function FieldRenderer({

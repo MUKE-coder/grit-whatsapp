@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
+import { useId, useState, useRef, useEffect, useMemo, useCallback, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { getResourceByEndpoint } from "@/resources";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -33,7 +33,7 @@ export function RelationshipSelectField({ field, value, onChange, error }: Relat
   const [justCreated, setJustCreated] = useState<Record<string, unknown> | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0, maxHeight: 340 });
 
   const endpoint = field.relatedEndpoint ?? "";
   const debouncedSearch = useDebouncedValue(search.trim(), 250);
@@ -54,11 +54,30 @@ export function RelationshipSelectField({ field, value, onChange, error }: Relat
     debouncedSearch !== "" && debouncedSearch === search.trim() &&
     searched.isSuccess && !searched.isPlaceholderData;
 
+  // Below when there is room, above when there is not, and never taller than
+  // the space it has.
+  //
+  // The panel is portalled and position: fixed, so a list that opens past the
+  // bottom edge cannot be scrolled to: it is the same as no list at all. The
+  // owner field on an --owned-by resource is the last field on the form,
+  // which made this the first picker anybody met.
   const updatePosition = useCallback(() => {
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
-    }
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const gutter = 8;
+    const below = window.innerHeight - rect.bottom - gutter;
+    const above = rect.top - gutter;
+    // Enough for the search box and a couple of options. Under that, the
+    // bigger side wins however small it is.
+    const minimum = 180;
+    const flip = below < minimum && above > below;
+    const space = Math.max((flip ? above : below) - 4, 120);
+    setPos({
+      top: flip ? Math.max(gutter, rect.top - Math.min(space, 340) - 4) : rect.bottom + 4,
+      left: rect.left,
+      width: rect.width,
+      maxHeight: Math.min(space, 340),
+    });
   }, []);
 
   useEffect(() => {
@@ -138,10 +157,10 @@ export function RelationshipSelectField({ field, value, onChange, error }: Relat
   const dropdown = open ? createPortal(
     <div
       ref={dropdownRef}
-      className="fixed z-[9999] rounded-md border border-border bg-bg-elevated shadow-lg"
-      style={{ top: pos.top, left: pos.left, width: pos.width, backgroundColor: "var(--bg-elevated, #22222e)" }}
+      className="fixed z-[9999] flex flex-col rounded-md border border-border bg-bg-elevated shadow-lg"
+      style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight, backgroundColor: "var(--bg-elevated, #22222e)" }}
     >
-      <div className="p-2">
+      <div className="shrink-0 p-2">
         <input
           type="text"
           placeholder="Search..."
@@ -152,7 +171,7 @@ export function RelationshipSelectField({ field, value, onChange, error }: Relat
           autoFocus
         />
       </div>
-      <div className="max-h-60 overflow-y-auto p-1">
+      <div className="min-h-0 flex-1 overflow-y-auto p-1">
         {isLoading ? (
           <div className="px-3 py-2 text-sm text-text-secondary">Loading...</div>
         ) : filtered.length === 0 ? (
@@ -192,7 +211,7 @@ export function RelationshipSelectField({ field, value, onChange, error }: Relat
           nesting this inside the populated branch would hide it precisely
           then. */}
       {canCreate && relatedResource && (
-        <div className="border-t border-border p-1">
+        <div className="shrink-0 border-t border-border p-1">
           <button
             type="button"
             onClick={() => { setOpen(false); setCreating(true); }}
@@ -210,18 +229,26 @@ export function RelationshipSelectField({ field, value, onChange, error }: Relat
     document.body
   ) : null;
 
+  const fieldId = useId();
+
   return (
     <div className="space-y-1.5">
       {/* Every other field type renders its label; this one did not, so a
           relationship was the one control on the form with nothing above it.
-          Visible on any generated form with a belongs_to, not just a tree. */}
-      <label className="block text-sm font-medium text-foreground">
+          Visible on any generated form with a belongs_to, not just a tree.
+          htmlFor and the matching id came later: without them the label was
+          drawn and named nothing, so a screen reader still announced the
+          picker as an unlabelled button. */}
+      <label htmlFor={fieldId} className="block text-sm font-medium text-foreground">
         {field.label}
         {field.required && <span className="text-danger ml-1">*</span>}
       </label>
       <button
+        id={fieldId}
         ref={triggerRef}
         type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => { if (!open) updatePosition(); setOpen(!open); }}
         className={`flex h-10 w-full items-center justify-between rounded-md border bg-bg-secondary px-3 py-2 text-sm text-foreground transition-colors
           ${error ? "border-red-500" : "border-border"}

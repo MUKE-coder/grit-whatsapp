@@ -34,6 +34,7 @@ export function TablePagination({
         <select
           value={pageSize}
           onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          aria-label={t("table.perPageLabel", "Rows per page")}
           className="rounded-lg border border-border bg-bg-tertiary px-2 py-1 text-sm text-foreground focus:border-accent focus:outline-none"
         >
           {[10, 20, 50, 100].map((size) => (
@@ -69,7 +70,7 @@ export function TablePagination({
               onClick={() => onPageChange(p)}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                 p === page
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-accent-fg"
                   : "border border-border bg-bg-tertiary text-text-secondary hover:bg-bg-hover"
               }`}
             >

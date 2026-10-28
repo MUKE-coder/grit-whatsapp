@@ -176,6 +176,10 @@ const (
 	CodePasswordRequired Code = "PASSWORD_REQUIRED"
 	// PAYLOAD_TOO_LARGE — The request body is larger than the server accepts.
 	CodePayloadTooLarge Code = "PAYLOAD_TOO_LARGE"
+	// PAYMENTS_UNAVAILABLE — No payment provider is configured here: STRIPE_SECRET_KEY is not set.
+	CodePaymentsUnavailable Code = "PAYMENTS_UNAVAILABLE"
+	// PAYMENT_PROVIDER_ERROR — Stripe refused or failed the request. The message carries what Stripe said.
+	CodePaymentProviderError Code = "PAYMENT_PROVIDER_ERROR"
 	// PDF_ERROR — The PDF could not be rendered.
 	CodePDFError Code = "PDF_ERROR"
 	// PERSIST_FAILED — The change was accepted and could not be written.
@@ -490,6 +494,12 @@ var catalogue = map[Code]Meaning{
 	CodePayloadTooLarge: {Status: http.StatusRequestEntityTooLarge, Category: CategoryRequest, Area: "core",
 		Meaning: "The request body is larger than the server accepts.",
 		Client:  "Send less, or upload the file directly to storage with a presigned URL."},
+	CodePaymentsUnavailable: {Status: http.StatusServiceUnavailable, Category: CategoryDisabled, Area: "payments",
+		Meaning: "No payment provider is configured here: STRIPE_SECRET_KEY is not set.",
+		Client:  "Hide checkout unless payments are configured. Nothing the client sends will fix it."},
+	CodePaymentProviderError: {Status: http.StatusBadGateway, Category: CategoryUpstream, Area: "payments",
+		Meaning: "Stripe refused or failed the request. The message carries what Stripe said.",
+		Client:  "Retry once. Nobody has been charged: a payment is only taken when the customer confirms it."},
 	CodePDFError: {Status: http.StatusInternalServerError, Category: CategoryServer, Area: "pdf",
 		Meaning: "The PDF could not be rendered.",
 		Client:  "Retry once. The record itself is unaffected."},

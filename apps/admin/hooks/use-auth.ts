@@ -8,6 +8,11 @@ import type {
   ApiResponse,
 } from "@repo/shared/types";
 import { apiClient } from "@/lib/api-client";
+import {
+  encodeAssertion,
+  toRequestOptions,
+  type RequestOptionsJSON,
+} from "@/lib/webauthn";
 
 // Auth flow (Grit 3.27+):
 //   - User shape lives in packages/shared/types/user.ts (the SAME type
@@ -72,7 +77,48 @@ export function useLogin() {
       // showing the code prompt.
       if (isChallenge(data.data)) return;
       queryClient.setQueryData(["me"], data.data.user);
-      router.push(data.data.user.role === "USER" ? "/profile" : "/dashboard");
+      router.push(data.data.user.role === "USER" ? "/account" : "/dashboard");
+    },
+  });
+}
+
+// Signs in with a passkey, no email and no password.
+//
+// BeginLogin is called without a user, so the challenge carries no
+// allowCredentials and the browser offers whichever passkeys it holds for this
+// site: the discoverable-credential flow, which is the one that lets somebody
+// tap a fingerprint reader and be in.
+//
+// The server answers with the same token pair a password sign-in issues and
+// records the same session row, so everything downstream, including Active
+// Sessions, is unchanged.
+export function usePasskeyLogin() {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async () => {
+      const { data: begun } = await apiClient.post<
+        ApiResponse<{ session_id: string; options: RequestOptionsJSON }>
+      >("/api/auth/passkeys/login/begin", {});
+
+      const assertion = (await navigator.credentials.get({
+        publicKey: toRequestOptions(begun.data.options),
+      })) as PublicKeyCredential | null;
+      if (!assertion) throw new Error("No passkey was chosen.");
+
+      // The session id goes in the query string because the body is the raw
+      // assertion: the server hands it to the WebAuthn library unparsed, and
+      // wrapping it in an envelope would mean unwrapping it there.
+      const { data } = await apiClient.post<ApiResponse<AuthResponse>>(
+        "/api/auth/passkeys/login/finish?session=" + encodeURIComponent(begun.data.session_id),
+        encodeAssertion(assertion),
+      );
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["me"], data.data.user);
+      router.push(data.data.user.role === "USER" ? "/account" : "/dashboard");
     },
   });
 }
@@ -103,7 +149,7 @@ export function useVerifyTOTP() {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(["me"], data.data.user);
-      router.push(data.data.user.role === "USER" ? "/profile" : "/dashboard");
+      router.push(data.data.user.role === "USER" ? "/account" : "/dashboard");
     },
   });
 }
@@ -234,7 +280,7 @@ export function useRegister() {
     },
     onSuccess: (data) => {
       queryClient.setQueryData(["me"], data.data.user);
-      router.push(data.data.user.role === "USER" ? "/profile" : "/dashboard");
+      router.push(data.data.user.role === "USER" ? "/account" : "/dashboard");
     },
   });
 }

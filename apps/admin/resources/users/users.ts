@@ -85,6 +85,15 @@ export const usersResource = defineResource({
     pageSize: 20,
   },
 
+  insights: {
+    breakdown: ["role", "provider", "active"],
+    labels: {
+      role: { ADMIN: "Admin", EDITOR: "Editor", USER: "User" },
+      provider: { local: "Email", google: "Google", github: "GitHub" },
+      active: { "true": "Active", "1": "Active", "false": "Inactive", "0": "Inactive" },
+    },
+  },
+
   form: {
     layout: "two-column",
     fields: [

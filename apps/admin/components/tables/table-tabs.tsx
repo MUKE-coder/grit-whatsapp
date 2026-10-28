@@ -109,7 +109,7 @@ export function TableTabs({ tabs, active, onChange, endpoint, baseFilters }: Tab
               "inline-flex min-h-10 items-center gap-2 rounded-t-lg border-b-2 px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent " +
               (selected
                 ? "border-accent font-medium text-accent"
-                : "border-transparent text-text-secondary hover:bg-bg-hover hover:text-text-primary")
+                : "border-transparent text-text-secondary hover:bg-bg-hover hover:text-foreground")
             }
           >
             {Icon && <Icon className="h-3.5 w-3.5" aria-hidden="true" />}

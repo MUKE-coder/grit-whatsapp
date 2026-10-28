@@ -65,12 +65,21 @@ func newTestDB(tb testing.TB) *gorm.DB {
 	return db
 }
 
-func newTestAuthSvc(cfg *config.Config) *services.AuthService {
-	return &services.AuthService{
+// newTestAuthSvc builds the service. Pass the database when the handler under
+// test reaches the service's own queries: AuthService.DB is optional for
+// tokens and required for UserByEmail, and ForgotPassword goes through
+// UserByEmail, so without it the handler panics on a nil *gorm.DB rather than
+// answering.
+func newTestAuthSvc(cfg *config.Config, db ...*gorm.DB) *services.AuthService {
+	svc := &services.AuthService{
 		Secret:        cfg.JWTSecret,
 		AccessExpiry:  cfg.JWTAccessExpiry,
 		RefreshExpiry: cfg.JWTRefreshExpiry,
 	}
+	if len(db) > 0 {
+		svc.DB = db[0]
+	}
+	return svc
 }
 
 func testCfg() *config.Config {
@@ -118,7 +127,7 @@ func TestAuthHandler_ForgotPassword_EmailsTheResetLink(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.PasswordResetToken{}))
 	seedMailUser(t, db)
 	fake := mailtest.New()
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg, Mailer: fake.Mailer()}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg, Mailer: fake.Mailer()}
 	r := newAuthRouter(h)
 	r.POST("/api/auth/forgot-password", h.ForgotPassword)
 
@@ -142,7 +151,7 @@ func TestAuthHandler_SendVerificationEmail_EmailsTheLink(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&models.EmailVerificationToken{}))
 	user := seedMailUser(t, db)
 	fake := mailtest.New()
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg, Mailer: fake.Mailer()}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg, Mailer: fake.Mailer()}
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/api/auth/send-verification", func(c *gin.Context) {
@@ -159,7 +168,7 @@ func TestAuthHandler_SendVerificationEmail_EmailsTheLink(t *testing.T) {
 func TestAuthHandler_Register_Success(t *testing.T) {
 	cfg := testCfg()
 	db := newTestDB(t)
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg}
 	r := newAuthRouter(h)
 
 	w := postJSON(t, r, "/api/auth/register", map[string]string{
@@ -184,7 +193,7 @@ func TestAuthHandler_Register_Success(t *testing.T) {
 func TestAuthHandler_Register_ValidationError(t *testing.T) {
 	cfg := testCfg()
 	db := newTestDB(t)
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg}
 	r := newAuthRouter(h)
 
 	// Missing required fields (first_name, last_name, password)
@@ -204,7 +213,7 @@ func TestAuthHandler_Register_ValidationError(t *testing.T) {
 func TestAuthHandler_Register_DuplicateEmail(t *testing.T) {
 	cfg := testCfg()
 	db := newTestDB(t)
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg}
 	r := newAuthRouter(h)
 
 	body := map[string]string{
@@ -232,7 +241,7 @@ func TestAuthHandler_Register_DuplicateEmail(t *testing.T) {
 func TestAuthHandler_Login_Success(t *testing.T) {
 	cfg := testCfg()
 	db := newTestDB(t)
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg}
 	r := newAuthRouter(h)
 
 	// Register first
@@ -266,7 +275,7 @@ func TestAuthHandler_Login_Success(t *testing.T) {
 func TestAuthHandler_Login_WrongPassword(t *testing.T) {
 	cfg := testCfg()
 	db := newTestDB(t)
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg}
 	r := newAuthRouter(h)
 
 	postJSON(t, r, "/api/auth/register", map[string]string{
@@ -293,7 +302,7 @@ func TestAuthHandler_Login_WrongPassword(t *testing.T) {
 func TestAuthHandler_Login_UnknownEmail(t *testing.T) {
 	cfg := testCfg()
 	db := newTestDB(t)
-	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg), Config: cfg}
+	h := &AuthHandler{DB: db, AuthService: newTestAuthSvc(cfg, db), Config: cfg}
 	r := newAuthRouter(h)
 
 	w := postJSON(t, r, "/api/auth/login", map[string]string{

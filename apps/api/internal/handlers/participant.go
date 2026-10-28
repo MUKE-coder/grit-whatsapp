@@ -49,9 +49,16 @@ func (h *ParticipantHandler) ctx(c *gin.Context) context.Context {
 // message, and anything else as an opaque 500 that is logged.
 func (h *ParticipantHandler) fail(c *gin.Context, err error, fallback string) {
 	var conflict *concurrency.ErrConflict
+	var denied *authz.DeniedError
 	switch {
 	case errors.As(err, &conflict):
 		concurrency.WriteConflict(c, conflict.Current)
+	case errors.As(err, &denied):
+		// A policy refused, and said why. 403 rather than the 404 that
+		// ownership uses: the caller is already allowed to see this row,
+		// so hiding it says nothing and withholds the reason, which is the
+		// thing the rule exists to give.
+		respond.Fail(c, respond.CodeForbidden, denied.Reason)
 	case errors.Is(err, gorm.ErrRecordNotFound):
 		respond.Fail(c, respond.CodeNotFound, "Participant not found")
 	default:
@@ -418,5 +425,112 @@ func (h *ParticipantHandler) Bulk(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"data":    gin.H{"affected": len(ids), "requested": len(req.IDs)},
 		"message": strconv.Itoa(len(ids)) + " " + noun + " " + past,
+	})
+}
+
+// The two grid endpoints, for the admin's spreadsheet editors.
+//
+// Separate from Bulk rather than actions on it, because the request shapes are
+// genuinely different: Bulk takes ids and ONE patch for all of them, and these
+// take a row each. Folding them in would mean a required ids field that two of
+// the five actions ignore.
+
+// BulkEditParticipantRequest is the grid's save: one patch per row.
+type BulkEditParticipantRequest struct {
+	// Capped for the same reason Bulk's ids are: a transaction holding five
+	// hundred row locks is a transaction other writers wait behind.
+	Items []services.ParticipantGridEdit `json:"items" binding:"required,min=1,max=500"`
+}
+
+// BulkEdit saves a grid of edits, one patch per row, in one transaction.
+func (h *ParticipantHandler) BulkEdit(c *gin.Context) {
+	var req BulkEditParticipantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respond.Fail(c, respond.CodeValidationError, err.Error())
+		return
+	}
+
+	saved, rowErrors, err := h.service().BulkEdit(h.ctx(c), req.Items)
+	if err != nil {
+		h.fail(c, err, "Failed to save the participants")
+		return
+	}
+	// Row errors are a 422 with the rows in it, so the grid can put each
+	// message back on the line it belongs to rather than showing one banner.
+	if len(rowErrors) > 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": gin.H{
+			"code":    "VALIDATION_ERROR",
+			"message": "Some rows could not be saved",
+			"details": gin.H{"rows": rowErrors},
+		}})
+		return
+	}
+	if len(saved) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"data":    gin.H{"affected": 0, "requested": len(req.Items)},
+			"message": "Nothing to do",
+		})
+		return
+	}
+
+	noun := "participants"
+	if len(saved) == 1 {
+		noun = "participant"
+	}
+	summary := "edited " + strconv.Itoa(len(saved)) + " " + noun + " in the grid"
+	events.Emitted(c, "participants", "Participant", "bulk", saved[0], summary, summary, nil, nil)
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":    gin.H{"affected": len(saved), "requested": len(req.Items)},
+		"message": strconv.Itoa(len(saved)) + " " + noun + " updated",
+	})
+}
+
+// BulkCreateParticipantRequest is the grid's insert: whole rows, no ids.
+type BulkCreateParticipantRequest struct {
+	Items []map[string]interface{} `json:"items" binding:"required,min=1,max=500"`
+}
+
+// BulkCreate inserts a grid of new participants in one transaction.
+func (h *ParticipantHandler) BulkCreate(c *gin.Context) {
+	var req BulkCreateParticipantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respond.Fail(c, respond.CodeValidationError, err.Error())
+		return
+	}
+
+	created, rowErrors, err := h.service().BulkCreate(h.ctx(c), req.Items)
+	if err != nil {
+		h.fail(c, err, "Failed to create the participants")
+		return
+	}
+	if len(rowErrors) > 0 {
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"error": gin.H{
+			"code":    "VALIDATION_ERROR",
+			"message": "Some rows could not be created",
+			"details": gin.H{"rows": rowErrors},
+		}})
+		return
+	}
+	if len(created) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"data":    gin.H{"affected": 0, "requested": len(req.Items)},
+			"message": "Nothing to do",
+		})
+		return
+	}
+
+	noun := "participants"
+	if len(created) == 1 {
+		noun = "participant"
+	}
+	summary := "created " + strconv.Itoa(len(created)) + " " + noun + " in the grid"
+	events.Emitted(c, "participants", "Participant", "bulk", created[0].ID, summary, summary, nil, nil)
+
+	// The rows as stored, so the grid can show the ids, the generated slugs and
+	// anything else a hook filled in rather than guessing at them.
+	c.JSON(http.StatusCreated, gin.H{
+		"data":    created,
+		"message": strconv.Itoa(len(created)) + " " + noun + " created",
 	})
 }

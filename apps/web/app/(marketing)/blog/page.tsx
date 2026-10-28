@@ -10,8 +10,6 @@ export const metadata: Metadata = {
 
 const PAGE_SIZE = 9;
 
-// Rendered on the server. Pages are links (?page=2), so each one is a URL a
-// crawler can follow and a reader can share.
 export default async function BlogListPage({
   searchParams,
 }: {
@@ -22,7 +20,6 @@ export default async function BlogListPage({
   const { blogs, meta } = await getPublishedBlogs(page, PAGE_SIZE);
   const pages = meta?.pages ?? 0;
   const pageHref = (n: number) => (n <= 1 ? "/blog" : `/blog?page=${n}`);
-
   return (
     <div className="mx-auto max-w-5xl px-6 py-16">
       {/* Header */}
@@ -110,7 +107,7 @@ export default async function BlogListPage({
                     aria-current={page === i + 1 ? "page" : undefined}
                     className={`flex h-8 w-8 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
                       page === i + 1
-                        ? "bg-accent text-white"
+                        ? "bg-accent text-accent-fg"
                         : "text-text-secondary hover:bg-bg-hover hover:text-foreground"
                     }`}
                   >

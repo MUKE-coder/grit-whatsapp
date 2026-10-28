@@ -52,7 +52,7 @@ export function PulseAuthShell({ theme, mode, title, subtitle, children, errorMe
       <div className="flex flex-1 items-center justify-center px-6 py-12 lg:px-12">
         <div className="w-full max-w-md space-y-8">
           <div className="flex items-center gap-2 text-xl font-bold" style={{ color: t.fg }}>
-            <BrandMark accent={t.accent} />
+            <BrandMark accent={t.accent} fg={t.primaryFg} />
             <span style={{ fontFamily: f.display }}>{brand.name}</span>
           </div>
 
@@ -177,14 +177,14 @@ function PulseHeroCarousel({ accent, fg, bg, fontDisplay }: { accent: string; fg
   );
 }
 
-function BrandMark({ accent }: { accent: string }) {
+function BrandMark({ accent, fg }: { accent: string; fg: string }) {
   if (brand.logo.image) {
     return <img src={brand.logo.image} alt={brand.name} className="h-7 w-7" />;
   }
   return (
     <span
-      className="inline-flex h-7 w-7 items-center justify-center rounded text-black font-bold"
-      style={{ background: accent }}
+      className="inline-flex h-7 w-7 items-center justify-center rounded font-bold"
+      style={{ background: accent, color: fg }}
     >
       {brand.logo.text}
     </span>

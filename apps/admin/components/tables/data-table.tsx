@@ -5,18 +5,10 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEven
 import Link from "next/link";
 import type { ColumnDefinition, RowActionDefinition } from "@/lib/resource";
 import { ColumnHeader } from "./column-header";
-import { renderCell } from "./cell-renderers";
+import { renderCell, getNestedValue } from "./cell-renderers";
 import { TableSkeleton } from "./table-skeleton";
 import { TableEmptyState } from "./table-empty-state";
 import { Eye, ArrowUpRight, Copy, Check } from "@/lib/icons";
-
-function getNestedValue(obj: Record<string, unknown>, path: string): unknown {
-  if (!path.includes(".")) return obj[path];
-  return path.split(".").reduce<unknown>(
-    (acc, key) => acc && typeof acc === "object" ? (acc as Record<string, unknown>)[key] : undefined,
-    obj
-  );
-}
 
 // ClickableCell wraps a rendered cell when the column defines onClick. The two
 // built-ins ("link" → open the row, "copy" → copy the value) get an affordance
@@ -64,7 +56,7 @@ function ClickableCell({
       type="button"
       onClick={handle}
       title={title}
-      className="group/cell inline-flex max-w-full items-center gap-1.5 text-left hover:text-accent transition-colors"
+      className="group/cell inline-flex min-h-[24px] max-w-full items-center gap-1.5 text-left hover:text-accent transition-colors"
     >
       <span className="truncate">{children}</span>
       {behavior === "link" && (
@@ -100,6 +92,12 @@ interface DataTableProps<T extends object = Record<string, unknown>> {
   onDelete?: (id: string) => void;
   /** Extra per-row actions from the resource's table.rowActions. */
   rowActions?: RowActionDefinition[];
+  /**
+   * Whether a search or a filter is narrowing these rows. It decides which
+   * empty state to show: advice about filters is only useful to somebody who
+   * set one.
+   */
+  isFiltered?: boolean;
 }
 
 // The default for selectedRows. A fresh [] per render would rebuild the
@@ -120,6 +118,7 @@ export function DataTable<T extends object = Record<string, unknown>>({
   onEdit: onEditProp,
   onDelete,
   rowActions,
+  isFiltered,
 }: DataTableProps<T>) {
   // The row type is erased once, here. Everything below reads cells by string
   // key, and a concrete interface has no index signature to read them through.
@@ -159,7 +158,7 @@ export function DataTable<T extends object = Record<string, unknown>>({
   }
 
   if (data.length === 0) {
-    return <TableEmptyState />;
+    return <TableEmptyState filtered={Boolean(isFiltered)} />;
   }
 
   const toggleAll = () => {
@@ -179,12 +178,18 @@ export function DataTable<T extends object = Record<string, unknown>>({
           <tr className="border-b border-border">
             {onSelectRows && (
               <th className="w-[48px] px-4 py-3">
-                <input
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={toggleAll}
-                  className="h-4 w-4 rounded border-border bg-bg-tertiary accent-accent"
-                />
+                {/* The padding is the point: a 16px checkbox is under the 24px
+                    minimum target (WCAG 2.5.8), and the label is what the
+                    pointer and the screen reader both get hold of. */}
+                <label className="inline-flex cursor-pointer p-1">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={toggleAll}
+                    aria-label={allSelected ? "Clear the selection" : "Select every row on this page"}
+                    className="h-4 w-4 rounded border-border bg-bg-tertiary accent-accent"
+                  />
+                </label>
               </th>
             )}
             {columns.map((col) => (
@@ -243,6 +248,24 @@ interface DataTableRowProps {
   rowActions?: RowActionDefinition[];
 }
 
+// rowName is what a row's checkbox calls it.
+//
+// "Select" on its own is what every row said before, so a screen reader read
+// twenty identical checkboxes and the person had no way to tell which one they
+// were ticking. The first column with readable text is the name a person would
+// use, which is usually the title, and an id is the fallback rather than the
+// first choice: nobody identifies a row by its uuid.
+function rowName(row: Record<string, unknown>, columns: ColumnDefinition[]): string {
+  for (const col of columns) {
+    const value = row[col.key];
+    if (typeof value === "string" && value.trim() && value.length < 80) {
+      return value.trim();
+    }
+    if (typeof value === "number") return String(value);
+  }
+  return "this row";
+}
+
 // One row, memoised: it re-renders when its own row, its selected state or the
 // table's column and action props change, and not when a neighbour is ticked.
 const DataTableRow = memo(function DataTableRow({
@@ -268,12 +291,15 @@ const DataTableRow = memo(function DataTableRow({
     >
       {selectable && (
         <td className="px-4 py-3">
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={() => onToggle(id)}
-            className="h-4 w-4 rounded border-border bg-bg-tertiary accent-accent"
-          />
+          <label className="inline-flex cursor-pointer p-1">
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={() => onToggle(id)}
+              aria-label={"Select " + rowName(row, columns)}
+              className="h-4 w-4 rounded border-border bg-bg-tertiary accent-accent"
+            />
+          </label>
         </td>
       )}
       {columns.map((col) => {
@@ -306,7 +332,7 @@ const DataTableRow = memo(function DataTableRow({
             {onEdit && (
               <button
                 onClick={() => onEdit(row)}
-                className="text-xs text-text-secondary hover:text-accent transition-colors"
+                className="inline-flex min-h-[24px] items-center text-xs text-text-secondary hover:text-accent transition-colors"
               >
                 {t("form.edit", "Edit")}
               </button>
@@ -314,7 +340,7 @@ const DataTableRow = memo(function DataTableRow({
             {onDelete && (
               <button
                 onClick={() => onDelete(id)}
-                className="text-xs text-text-secondary hover:text-danger transition-colors"
+                className="inline-flex min-h-[24px] items-center text-xs text-text-secondary hover:text-danger transition-colors"
               >
                 {t("form.delete", "Delete")}
               </button>

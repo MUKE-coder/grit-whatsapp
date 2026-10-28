@@ -6,9 +6,11 @@ import { Suspense, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useMe } from "@/hooks/use-auth";
 import { useNotificationList, type NotificationList } from "@/hooks/use-notifications";
+import { DashboardSecurityNudges } from "@/components/dashboard/security-nudges";
 import { usePermissions } from "@/hooks/use-permissions";
 import { resources } from "@/resources";
 import { PageHeader } from "@/components/chrome/PageHeader";
+import { LiveClock } from "@/components/chrome/LiveClock";
 import { SkeletonCards } from "@/components/ui/Skeleton";
 import { DateFilter, type DateRange } from "@/components/tables/date-filter";
 import { ResourceWidgetsRow } from "@/components/dashboard/ResourceWidgetsRow";
@@ -142,9 +144,11 @@ export default function DashboardPage() {
 
   return (
     <div>
+      <DashboardSecurityNudges />
       <PageHeader
         title={greeting + ", " + (user?.first_name || "Admin")}
         subtitle="Here's a snapshot of what's happening across your app right now."
+        actions={<LiveClock />}
       />
 
       {/* v3.31.44 -- range filter scopes the per-resource widgets
@@ -213,7 +217,7 @@ export default function DashboardPage() {
               <p className="text-sm font-semibold text-foreground">Recent activity</p>
               <p className="text-xs text-text-muted">Latest 8 events across the platform</p>
             </div>
-            <Link href="/system/activity" className="text-xs font-medium text-accent hover:text-accent-hover">
+            <Link href="/system/activity" className="inline-flex min-h-[24px] items-center text-xs font-medium text-accent hover:text-accent-hover">
               View all
             </Link>
           </header>

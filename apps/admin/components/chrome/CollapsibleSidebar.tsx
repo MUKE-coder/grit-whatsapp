@@ -22,6 +22,8 @@ import {
   TrendingUp,
   Shield,
   ShieldCheck,
+  HardDrive,
+  UserCircle,
   UserCheck,
   Webhook,
   User as UserIcon,
@@ -33,7 +35,7 @@ import type { User } from "@repo/shared/types";
 // Surfaced in the sidebar footer so the user can quickly see what Grit
 // release their dashboard was built from. Update by re-scaffolding or
 // hand-bumping if you carry framework patches locally.
-const GRIT_CLI_VERSION = "v3.306.0";
+const GRIT_CLI_VERSION = "v3.419.1";
 
 // Internal nav block — pages that exist for every Grit app regardless of
 // which resources were generated. Kept out of the resources registry so
@@ -61,6 +63,42 @@ export type NavEntry = {
 export const SYSTEM_NAV: readonly NavEntry[] = [
   // grit:nav:system
 ] as const;
+
+// Plugins inject a WORKING surface here, as opposed to an operational one.
+//
+// SYSTEM_NAV above feeds the System Hub's Extensions tab, which is three
+// clicks from the dashboard. That is the right home for a webhook log or an
+// impersonation screen: things you open while configuring. It is the wrong
+// home for anything you open while working, and until this existed a plugin
+// had nowhere else to put one.
+//
+// Entries here render in the rail's Content group, beside the resources,
+// because that is what they are: a place the work lives. The marker MUST
+// stay inside this array literal, or "grit plugin add" can't wire its link.
+export const CONTENT_NAV: readonly NavEntry[] = [
+  // grit:nav:content
+] as const;
+
+// The system pages that earn a place in the rail.
+//
+// Four, not thirty. The test is whether somebody opens it while working rather
+// than while configuring: Operations when something feels slow, Security when
+// something looks wrong, Backups before anything irreversible, and Account
+// because it is where your own password and sessions are. Everything else is
+// one click further on, in the hub.
+const SYSTEM_GROUP = "__system";
+
+const SYSTEM_LINKS: ReadonlyArray<{
+  href: string;
+  label: string;
+  i18nKey: string;
+  icon: React.ReactNode;
+}> = [
+  { href: "/system/performance", label: "Operations", i18nKey: "nav.operations", icon: <TrendingUp className="h-5 w-5" /> },
+  { href: "/system/security", label: "Security", i18nKey: "nav.security", icon: <ShieldCheck className="h-5 w-5" /> },
+  { href: "/system/backups", label: "Backups", i18nKey: "nav.backups", icon: <HardDrive className="h-5 w-5" /> },
+  { href: "/account", label: "Account", i18nKey: "nav.account", icon: <UserCircle className="h-5 w-5" /> },
+];
 
 // Icon lookup for plugin-injected SYSTEM_NAV entries, keyed by iconKey.
 // Exported so the System Hub's Extensions tab renders the same icons. Keep
@@ -119,7 +157,11 @@ export function CollapsibleSidebar({
   const activeGroup = resources.find(
     (r) => r.group && pathname.startsWith("/resources/" + r.slug)
   )?.group;
-  const isGroupOpen = (key: string) => manualGroups[key] ?? key === activeGroup;
+  // A resource group opens when you are inside it. The system group opens by
+  // default, because the four links in it were promoted out of the hub to save
+  // a click and a collapsed group gives that click straight back.
+  const isGroupOpen = (key: string) =>
+    manualGroups[key] ?? (key === SYSTEM_GROUP || key === activeGroup);
 
   const isAdmin = user.role === "ADMIN" || user.role === "EDITOR";
   const toggle = (key: string) => setManualGroups((p) => ({ ...p, [key]: !isGroupOpen(key) }));
@@ -156,6 +198,15 @@ export function CollapsibleSidebar({
     if (!groups[key]) groups[key] = [];
     groups[key].push(r);
   }
+
+  // Plugin-injected working surfaces, filtered the same way resources are:
+  // an entry marked adminOnly is for admins, and one that names a permission
+  // waits for the permission check rather than flickering into view and out
+  // again while it loads.
+  const visibleContentNav = CONTENT_NAV.filter(
+    (entry) =>
+      (!entry.adminOnly || isAdmin) && (permsLoading || !entry.requires || can(entry.requires))
+  );
 
   return (
     <>
@@ -207,6 +258,18 @@ export function CollapsibleSidebar({
             onClick={onMobileClose}
           />
 
+          {/* The resources, under a heading of their own so the system group
+              below reads as a different kind of thing rather than more of the
+              same list. Suppressed when there are none, because a heading over
+              nothing is worse than no heading. A plugin-injected working
+              surface counts toward "none": the heading has to appear for a
+              project whose only Content entry came from a plugin. */}
+          {!collapsed && (groups._root.length > 0 || visibleContentNav.length > 0) && (
+            <p className="-mx-2 mt-3 border-t border-border px-4 pb-0.5 pt-3 text-xs font-semibold uppercase tracking-wider text-text-muted">
+              {t("nav.content", "Content")}
+            </p>
+          )}
+
           {groups._root.map((r) => {
             const Icon = getIcon(r.icon);
             return (
@@ -222,10 +285,28 @@ export function CollapsibleSidebar({
             );
           })}
 
+          {/* Working surfaces added by plugins: a board, a calendar, an inbox.
+              They sit with the resources because that is what they are to the
+              person using the app. */}
+          {visibleContentNav.map((entry) => {
+            const Icon = getIcon(entry.iconKey);
+            return (
+              <SidebarLink
+                key={entry.href}
+                href={entry.href}
+                icon={<Icon className="h-5 w-5" />}
+                label={t("nav." + entry.href.replace(/^\//, "").replace(/\//g, "."), entry.label)}
+                active={pathname === entry.href || pathname.startsWith(entry.href + "/")}
+                collapsed={collapsed}
+                onClick={onMobileClose}
+              />
+            );
+          })}
+
           {Object.entries(groups)
             .filter(([k]) => k !== "_root")
             .map(([groupName, items]) => (
-              <div key={groupName} className="pt-1">
+              <div key={groupName} className={collapsed ? "pt-1" : "-mx-2 mt-3 border-t border-border px-2 pt-3"}>
                 {!collapsed && (
                   <button
                     type="button"
@@ -263,16 +344,51 @@ export function CollapsibleSidebar({
               anything plugins add). They're grouped into tabs inside the hub at
               /system rather than crowding the rail. Admin-only, matching the
               surfaces it fronts. Highlights for /system/* and /settings/*. */}
+          {/* System — the four surfaces that get opened daily, then the hub
+              that fronts the other thirty. Promoting these is only affordable
+              because the group header keeps them from reading as a flat list:
+              before this, Operations was two clicks from anywhere. */}
           {showSystem && (
-            <div className="pt-3">
-              <SidebarLink
-                href="/system"
-                icon={<LayoutGrid className="h-5 w-5" />}
-                label={t("nav.systemHub", "System Hub")}
-                active={pathname.startsWith("/system") || pathname.startsWith("/settings")}
-                collapsed={collapsed}
-                onClick={onMobileClose}
-              />
+            <div className={collapsed ? "pt-2" : "-mx-2 mt-3 border-t border-border px-2 pt-3"}>
+              {!collapsed && (
+                <button
+                  type="button"
+                  onClick={() => toggle(SYSTEM_GROUP)}
+                  aria-expanded={isGroupOpen(SYSTEM_GROUP)}
+                  className="flex w-full items-center justify-between rounded px-2 py-1.5 text-xs font-semibold uppercase tracking-wider text-text-muted hover:text-text-secondary"
+                >
+                  <span>{t("nav.system", "System")}</span>
+                  <ChevronDown
+                    className={
+                      "h-3.5 w-3.5 transition-transform " +
+                      (isGroupOpen(SYSTEM_GROUP) ? "rotate-0" : "-rotate-90")
+                    }
+                  />
+                </button>
+              )}
+              {(collapsed || isGroupOpen(SYSTEM_GROUP)) && (
+                <>
+                  {SYSTEM_LINKS.map((link) => (
+                    <SidebarLink
+                      key={link.href}
+                      href={link.href}
+                      icon={link.icon}
+                      label={t(link.i18nKey, link.label)}
+                      active={pathname.startsWith(link.href)}
+                      collapsed={collapsed}
+                      onClick={onMobileClose}
+                    />
+                  ))}
+                  <SidebarLink
+                    href="/system"
+                    icon={<LayoutGrid className="h-5 w-5" />}
+                    label={t("nav.systemHub", "System Hub")}
+                    active={pathname === "/system" || pathname.startsWith("/settings")}
+                    collapsed={collapsed}
+                    onClick={onMobileClose}
+                  />
+                </>
+              )}
             </div>
           )}
         </nav>
@@ -352,7 +468,7 @@ function SidebarUserMenu({ user, collapsed }: { user: User; collapsed: boolean }
               User Activity
             </Link>
             <Link
-              href="/profile"
+              href="/account"
               onClick={() => setOpen(false)}
               className="flex items-center gap-3 px-4 py-2.5 text-text-secondary hover:bg-bg-hover hover:text-foreground"
             >
@@ -395,7 +511,7 @@ function BrandMark({ collapsed }: { collapsed: boolean }) {
   }
 
   return (
-    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white font-bold text-sm">
+    <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-fg font-bold text-sm">
       {brand.logo.text}
     </span>
   );

@@ -30,7 +30,7 @@ interface SettingSection {
 export default function SettingsScreen() {
   const router = useRouter();
   const { logout } = useAuth();
-  const { scheme, setMode } = useTheme();
+  const { scheme, setMode, palette } = useTheme();
   const [notifications, setNotifications] = useState(true);
   const [language, setLanguage] = useState("English");
 
@@ -146,7 +146,7 @@ export default function SettingsScreen() {
           <Switch
             value={item.id === "dark_mode" ? scheme === "dark" : notifications}
             onValueChange={(val) => handleToggle(item.id, val)}
-            trackColor={{ false: scheme === "dark" ? "#2a2a3a" : "#D1D5DB", true: "#6c5ce7" }}
+            trackColor={{ false: scheme === "dark" ? "#2a2a3a" : "#D1D5DB", true: palette.accent }}
             thumbColor="#ffffff"
           />
         ) : null}

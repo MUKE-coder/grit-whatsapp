@@ -54,7 +54,7 @@ export function AuroraAuthShell({ theme, mode, title, subtitle, children, errorM
         style={{ background: t.card, borderColor: t.border }}
       >
         <div className="flex flex-col items-center text-center space-y-3">
-          <BrandMark color={t.primary} />
+          <BrandMark color={t.primary} fg={t.primaryFg} />
           <div>
             <h2 className="text-2xl font-semibold" style={{ fontFamily: f.display }}>{title}</h2>
             {subtitle && <p className="mt-1 text-sm" style={{ color: t.muted }}>{subtitle}</p>}
@@ -90,14 +90,14 @@ export function AuroraAuthShell({ theme, mode, title, subtitle, children, errorM
   );
 }
 
-function BrandMark({ color }: { color: string }) {
+function BrandMark({ color, fg }: { color: string; fg: string }) {
   if (brand.logo.image) {
     return <img src={brand.logo.image} alt={brand.name} className="h-10 w-10" />;
   }
   return (
     <span
-      className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-white font-bold text-lg"
-      style={{ background: color }}
+      className="inline-flex h-10 w-10 items-center justify-center rounded-xl font-bold text-lg"
+      style={{ background: color, color: fg }}
     >
       {brand.logo.text}
     </span>

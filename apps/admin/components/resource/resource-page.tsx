@@ -7,6 +7,7 @@ import type { ResourceDefinition } from "@/lib/resource";
 import { useResourceController } from "@/hooks/use-resource-controller";
 import type { ResourceController } from "@/hooks/use-resource-controller";
 import { PageHeader } from "@/components/chrome/PageHeader";
+import { InsightsPanel } from "@/components/insights/insights-panel";
 import { DataTable } from "@/components/tables/data-table";
 // Lazy: only resources declaring tree: true ever render this, and an eager
 // import would put the drag-and-drop tree in every admin page's bundle.
@@ -18,7 +19,8 @@ import { TablePagination } from "@/components/tables/table-pagination";
 import { TableFilters } from "@/components/tables/table-filters";
 import { TableTabs } from "@/components/tables/table-tabs";
 import { BulkActionBar } from "@/components/tables/bulk-action-bar";
-import { BulkEditModal } from "@/components/tables/bulk-edit-modal";
+import { BulkEditGrid } from "@/components/tables/bulk-edit-grid";
+import { BulkCreateGrid } from "@/components/tables/bulk-create-grid";
 import { exportToFile } from "@/lib/excel-utils";
 // grit:resource:imports
 import { buttonClasses } from "@/components/ui/button";
@@ -160,6 +162,21 @@ function ResourceListView({ resource }: ResourcePageProps) {
         subtitle={`Manage ${c.pluralName.toLowerCase()}`}
         actions={headerActions}
         stats={c.stats}
+        // Clicking a counted card narrows the table to it, and clicking the
+        // same one again clears it. Toggling matters: a filter you cannot take
+        // off from where you put it on is one people reload the page to escape.
+        onStatFilter={(filter) =>
+          c.setFilter(filter.field, c.filters[filter.field] === filter.value ? "" : filter.value)
+        }
+        isStatFilterActive={(filter) => c.filters[filter.field] === filter.value}
+        insights={
+          <InsightsPanel
+            resource={c.resource}
+            filters={c.queryFilters}
+            search={c.search}
+            dateParams={c.dateParams}
+          />
+        }
       />
 
       {/* Bulk actions change the table without moving focus, so every one of
@@ -171,7 +188,10 @@ function ResourceListView({ resource }: ResourcePageProps) {
       {hasArchive && (
         <div className="mb-3 flex w-fit gap-1 rounded-lg border border-border bg-bg-secondary p-1">
           {[
-            { label: "Published", archived: false },
+            // Active, not Published: archiving is what these two tabs are
+            // about, and most resources have nothing to publish. A Contact
+            // is not published; a Group is not published.
+            { label: "Active", archived: false },
             { label: "Archived", archived: true },
           ].map((tab) => (
             <button
@@ -183,7 +203,7 @@ function ResourceListView({ resource }: ResourcePageProps) {
                 "min-h-9 rounded-md px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent " +
                 (c.showArchived === tab.archived
                   ? "bg-accent/15 font-medium text-accent"
-                  : "text-text-secondary hover:bg-bg-hover hover:text-text-primary")
+                  : "text-text-secondary hover:bg-bg-hover hover:text-foreground")
               }
             >
               {tab.label}
@@ -216,6 +236,7 @@ function ResourceListView({ resource }: ResourcePageProps) {
           onDateRangeChange={c.setDateRange}
           apiSearchParams={c.apiSearchParams}
           onImport={resource.table.import !== false ? () => c.importer.setOpen(true) : undefined}
+          onBulkCreate={c.can("create") ? () => c.bulkCreator.setOpen(true) : undefined}
         />
 
         {/* grit:table:toolbar */}
@@ -239,7 +260,7 @@ function ResourceListView({ resource }: ResourcePageProps) {
                 className={
                   "rounded-md px-3 py-1 text-xs font-medium capitalize transition-colors " +
                   (view === option
-                    ? "bg-accent text-white"
+                    ? "bg-accent text-accent-fg"
                     : "text-text-muted hover:text-foreground")
                 }
               >
@@ -293,6 +314,11 @@ function ResourceListView({ resource }: ResourcePageProps) {
             onEdit={c.can("edit") ? c.edit : undefined}
             onDelete={c.can("delete") ? c.remove : undefined}
             rowActions={resource.table.rowActions}
+            isFiltered={
+              c.search.trim() !== "" ||
+              Object.keys(c.queryFilters).length > 0 ||
+              c.showArchived
+            }
           />
         )}
         </div>
@@ -408,12 +434,28 @@ function ResourceListView({ resource }: ResourcePageProps) {
       )}
 
       {c.bulkEditor.open && (
-        <BulkEditModal
+        <BulkEditGrid
           resource={resource}
-          count={c.selection.length}
-          pending={c.isBulkPending}
-          onApply={c.applyBulkEdit}
+          rows={c.selectedRows as Record<string, unknown>[]}
+          onSaved={(count) => {
+            c.bulkEditor.close();
+            c.clearSelection();
+            c.refresh();
+            c.announce(count + " updated.");
+          }}
           onClose={c.bulkEditor.close}
+        />
+      )}
+
+      {c.bulkCreator.open && (
+        <BulkCreateGrid
+          resource={resource}
+          onCreated={(count) => {
+            c.bulkCreator.setOpen(false);
+            c.refresh();
+            c.announce(count + " created.");
+          }}
+          onClose={() => c.bulkCreator.setOpen(false)}
         />
       )}
 

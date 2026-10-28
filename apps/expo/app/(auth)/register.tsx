@@ -21,6 +21,7 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "@/lib/auth";
 import { PressableScale } from "@/components/ui/pressable-scale";
 import { Image } from "expo-image";
+import { APP_INITIAL } from "@/lib/brand";
 import { useTheme } from "@/lib/theme";
 
 const registerSchema = z.object({
@@ -97,7 +98,7 @@ export default function RegisterScreen() {
               entering={FadeInUp.duration(500)}
               className="rounded-[28px] bg-white dark:bg-[#111118] border border-[#E5E7EB] dark:border-[#1f1f2b] overflow-hidden"
               style={{
-                shadowColor: "#6c5ce7",
+                shadowColor: palette.accent,
                 shadowOffset: { width: 0, height: 18 },
                 shadowOpacity: 0.18,
                 shadowRadius: 32,
@@ -120,17 +121,37 @@ export default function RegisterScreen() {
                       shadowRadius: 22,
                     }}
                   >
-                    <Image
-                      source={require("../../assets/icon.png")}
-                      style={{ width: 76, height: 76, borderRadius: 20 }}
-                      contentFit="contain"
-                    />
+                    {/* The project's own initial, in its own accent colour.
+                        This used to render assets/icon.png, which every
+                        scaffold shipped as the Grit logo, so an app showed
+                        somebody else's brand on its sign-in screen. */}
+                    <View
+                      style={{
+                        width: 76,
+                        height: 76,
+                        borderRadius: 20,
+                        backgroundColor: palette.accent,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Text
+                        style={{
+                          color: palette.accentForeground,
+                          fontSize: 38,
+                          fontWeight: "700",
+                          lineHeight: 44,
+                        }}
+                      >
+                        {APP_INITIAL}
+                      </Text>
+                    </View>
                   </View>
                   <Text className="text-[28px] font-bold text-[#0F1018] dark:text-white tracking-tight">
                     Create account
                   </Text>
                   <Text className="text-[#6B7280] dark:text-[#9090a8] text-[14px] mt-1.5 px-6 text-center leading-5">
-                    Get started with Grit in seconds.
+                    Get started in seconds.
                   </Text>
                 </View>
               </LinearGradient>
@@ -251,7 +272,7 @@ export default function RegisterScreen() {
                           <Ionicons
                             name={showPassword ? "eye-off-outline" : "eye-outline"}
                             size={19}
-                            color={showPassword ? "#6c5ce7" : "#606078"}
+                            color={showPassword ? palette.accent : palette.inputIcon}
                           />
                         </Pressable>
                       </View>
@@ -293,7 +314,7 @@ export default function RegisterScreen() {
                   pressScale={0.97}
                   className="overflow-hidden rounded-full"
                   style={{
-                    shadowColor: "#6c5ce7",
+                    shadowColor: palette.accent,
                     shadowOffset: { width: 0, height: 10 },
                     shadowOpacity: 0.4,
                     shadowRadius: 18,
@@ -301,7 +322,7 @@ export default function RegisterScreen() {
                   }}
                 >
                   <LinearGradient
-                    colors={["#7c6cf7", "#6c5ce7"]}
+                    colors={[palette.accentHover, palette.accent]}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={{ height: 54, flexDirection: "row", alignItems: "center", justifyContent: "center" }}
@@ -322,7 +343,7 @@ export default function RegisterScreen() {
                 <View className="flex-row justify-center mt-6">
                   <Text className="text-[#6B7280] dark:text-[#9090a8] text-[13.5px]">Already have an account? </Text>
                   <Link href="/(auth)/login">
-                    <Text className="text-[#6c5ce7] font-semibold text-[13.5px]">Sign in</Text>
+                    <Text className="text-accent font-semibold text-[13.5px]">Sign in</Text>
                   </Link>
                 </View>
               </View>

@@ -10,6 +10,7 @@ import (
 	"whatsapp/apps/api/internal/authz"
 	"whatsapp/apps/api/internal/models"
 	"whatsapp/apps/api/internal/respond"
+	"whatsapp/apps/api/internal/services"
 )
 
 // RoleHandler serves the roles + permissions API.
@@ -19,6 +20,23 @@ type RoleHandler struct {
 
 func NewRoleHandler(db *gorm.DB) *RoleHandler {
 	return &RoleHandler{DB: db}
+}
+
+// roles is the service every method below reads and writes through. Built per
+// request because it is one field and a struct literal, and because building it
+// here means the wiring in routes.go did not have to change.
+//
+// What a role is, how its holders are counted and which writes share a
+// transaction are decisions about data: see internal/services/role.go. What
+// follows decides who may ask.
+func (h *RoleHandler) roles() *services.RoleService {
+	return &services.RoleService{DB: h.DB}
+}
+
+// users is the same thing for the one account this handler reads: the user whose
+// roles are being replaced.
+func (h *RoleHandler) users() *services.UserService {
+	return &services.UserService{DB: h.DB}
 }
 
 // roleDTO is a Role plus the derived fields the UI needs.
@@ -59,25 +77,17 @@ func (h *RoleHandler) Catalog(c *gin.Context) {
 
 // List returns every role with how many users hold it.
 func (h *RoleHandler) List(c *gin.Context) {
-	var roles []models.Role
-	if err := h.DB.WithContext(c.Request.Context()).Order("is_system DESC, name ASC").Find(&roles).Error; err != nil {
+	roles, err := h.roles().All(c.Request.Context())
+	if err != nil {
 		respond.Internal(c, err)
 		return
 	}
-
-	// One grouped count instead of a query per role.
-	type countRow struct {
-		RoleID string
-		N      int64
-	}
-	var rows []countRow
-	h.DB.WithContext(c.Request.Context()).Model(&models.UserRole{}).
-		Select("role_id, count(*) as n").
-		Group("role_id").
-		Scan(&rows)
-	counts := map[string]int64{}
-	for _, r := range rows {
-		counts[r.RoleID] = r.N
+	// The count the list shows beside each role. Its error used to go nowhere,
+	// so a failure drew every role as held by nobody.
+	counts, err := h.roles().HolderCounts(c.Request.Context())
+	if err != nil {
+		respond.Internal(c, err)
+		return
 	}
 
 	out := make([]roleDTO, 0, len(roles))
@@ -88,14 +98,17 @@ func (h *RoleHandler) List(c *gin.Context) {
 }
 
 func (h *RoleHandler) Get(c *gin.Context) {
-	var role models.Role
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", c.Param("id")).First(&role).Error; err != nil {
+	role, err := h.roles().ByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		respond.NotFound(c, "Role not found")
 		return
 	}
-	var n int64
-	h.DB.WithContext(c.Request.Context()).Model(&models.UserRole{}).Where("role_id = ?", role.ID).Count(&n)
-	respond.OK(c, h.toDTO(role, n))
+	n, err := h.roles().Holders(c.Request.Context(), role.ID)
+	if err != nil {
+		respond.Internal(c, err)
+		return
+	}
+	respond.OK(c, h.toDTO(*role, n))
 }
 
 type RoleRequest struct {
@@ -148,8 +161,12 @@ func (h *RoleHandler) Create(c *gin.Context) {
 		return
 	}
 
-	var existing models.Role
-	if err := h.DB.WithContext(c.Request.Context()).Where("name = ?", in.Name).First(&existing).Error; err == nil {
+	taken, err := h.roles().NameTaken(c.Request.Context(), in.Name)
+	if err != nil {
+		respond.Internal(c, err)
+		return
+	}
+	if taken {
 		respond.Conflict(c, "A role with that name already exists")
 		return
 	}
@@ -159,17 +176,17 @@ func (h *RoleHandler) Create(c *gin.Context) {
 		respond.Internal(c, err)
 		return
 	}
-	if err := h.DB.WithContext(c.Request.Context()).Create(&role).Error; err != nil {
+	// The service drops the grant cache when the write lands.
+	if err := h.roles().Create(c.Request.Context(), &role); err != nil {
 		respond.Internal(c, err)
 		return
 	}
-	authz.Invalidate()
 	respond.Created(c, h.toDTO(role, 0), "Role created")
 }
 
 func (h *RoleHandler) Update(c *gin.Context) {
-	var role models.Role
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", c.Param("id")).First(&role).Error; err != nil {
+	role, err := h.roles().ByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		respond.NotFound(c, "Role not found")
 		return
 	}
@@ -214,20 +231,22 @@ func (h *RoleHandler) Update(c *gin.Context) {
 		respond.Internal(c, err)
 		return
 	}
-	if err := h.DB.WithContext(c.Request.Context()).Save(&role).Error; err != nil {
+	if err := h.roles().Save(c.Request.Context(), role); err != nil {
 		respond.Internal(c, err)
 		return
 	}
-	authz.Invalidate()
 
-	var n int64
-	h.DB.WithContext(c.Request.Context()).Model(&models.UserRole{}).Where("role_id = ?", role.ID).Count(&n)
-	respond.OK(c, h.toDTO(role, n), "Role updated")
+	n, err := h.roles().Holders(c.Request.Context(), role.ID)
+	if err != nil {
+		respond.Internal(c, err)
+		return
+	}
+	respond.OK(c, h.toDTO(*role, n), "Role updated")
 }
 
 func (h *RoleHandler) Delete(c *gin.Context) {
-	var role models.Role
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", c.Param("id")).First(&role).Error; err != nil {
+	role, err := h.roles().ByID(c.Request.Context(), c.Param("id"))
+	if err != nil {
 		respond.NotFound(c, "Role not found")
 		return
 	}
@@ -236,37 +255,26 @@ func (h *RoleHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	// A role still assigned to users cannot be deleted — removing it would
+	// A role still assigned to users cannot be deleted: removing it would
 	// silently strip those users of the permissions it grants. Reassign or
 	// remove them first, then the role becomes deletable.
 	//
-	// Assignment comes two ways and BOTH must be counted: the user_roles
-	// join table (the real model) AND the legacy users.role string, which is
-	// how the admin's user form assigns a role today. Checking only the join
-	// table let a role deleted out from under string-assigned users.
-	var viaJoin, viaString int64
-	if err := h.DB.WithContext(c.Request.Context()).Model(&models.UserRole{}).Where("role_id = ?", role.ID).Count(&viaJoin).Error; err != nil {
+	// Both ways a role reaches a user are counted, which is the service's
+	// Assignments: see why there.
+	assigned, err := h.roles().Assignments(c.Request.Context(), role)
+	if err != nil {
 		respond.Internal(c, err)
 		return
 	}
-	if err := h.DB.WithContext(c.Request.Context()).Model(&models.User{}).Where("role = ?", role.Name).Count(&viaString).Error; err != nil {
-		respond.Internal(c, err)
-		return
-	}
-	if total := viaJoin + viaString; total > 0 {
-		respond.BadRequest(c, fmt.Sprintf("Role is assigned to %d user(s); reassign them before deleting it", total))
+	if assigned > 0 {
+		respond.BadRequest(c, fmt.Sprintf("Role is assigned to %d user(s); reassign them before deleting it", assigned))
 		return
 	}
 
-	// Hard delete (Unscoped): the role name has a unique index, and a soft
-	// delete leaves a tombstone row that blocks ever creating a role with the
-	// same name again ("duplicate key idx_roles_name"). An unassigned role has
-	// no audit value, so remove it outright.
-	if err := h.DB.WithContext(c.Request.Context()).Unscoped().Delete(&role).Error; err != nil {
+	if err := h.roles().Delete(c.Request.Context(), role); err != nil {
 		respond.Internal(c, err)
 		return
 	}
-	authz.Invalidate()
 	respond.OK(c, gin.H{"id": role.ID}, "Role deleted")
 }
 
@@ -278,8 +286,8 @@ type AssignRolesRequest struct {
 func (h *RoleHandler) AssignUserRoles(c *gin.Context) {
 	userID := c.Param("id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).Where("id = ?", userID).First(&user).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), userID)
+	if err != nil {
 		respond.NotFound(c, "User not found")
 		return
 	}
@@ -290,27 +298,25 @@ func (h *RoleHandler) AssignUserRoles(c *gin.Context) {
 		return
 	}
 
-	// Reject unknown role ids rather than silently dropping them.
-	if len(in.RoleIDs) > 0 {
-		var n int64
-		h.DB.WithContext(c.Request.Context()).Model(&models.Role{}).Where("id IN ?", in.RoleIDs).Count(&n)
-		if int(n) != len(in.RoleIDs) {
-			respond.BadRequest(c, "One or more roles do not exist")
-			return
-		}
+	// Reject unknown role ids rather than silently dropping them. The rows are
+	// read once here and used again by the ceiling check below, which used to
+	// count them and then fetch them.
+	roles, err := h.roles().ByIDs(c.Request.Context(), in.RoleIDs)
+	if err != nil {
+		respond.Internal(c, err)
+		return
+	}
+	if len(roles) != len(in.RoleIDs) {
+		respond.BadRequest(c, "One or more roles do not exist")
+		return
 	}
 
 	// The ceiling applies to assignment too: only an ADMIN changes an ADMIN's
 	// roles or hands out ADMIN, and nobody else hands out a role that grants more
 	// than they hold. Before, a users.edit holder could assign themselves ADMIN.
 	if !authz.IsAdmin(c) {
-		if authz.IsAdminAccount(h.DB, &user) {
+		if authz.IsAdminAccount(h.DB, user) {
 			respond.Forbidden(c, "Only an ADMIN can change an ADMIN's roles")
-			return
-		}
-		var roles []models.Role
-		if err := h.DB.WithContext(c.Request.Context()).Where("id IN ?", in.RoleIDs).Find(&roles).Error; err != nil {
-			respond.Internal(c, err)
 			return
 		}
 		for i := range roles {
@@ -325,33 +331,12 @@ func (h *RoleHandler) AssignUserRoles(c *gin.Context) {
 		}
 	}
 
-	err := h.DB.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("user_id = ?", userID).Delete(&models.UserRole{}).Error; err != nil {
-			return err
-		}
-		for _, rid := range in.RoleIDs {
-			if err := tx.Create(&models.UserRole{UserID: userID, RoleID: rid}).Error; err != nil {
-				return err
-			}
-		}
-		// Keep the legacy users.role string in step with the primary role.
-		// Grant resolution prefers user_roles, but routes still guarded by a
-		// role NAME read this column — leaving it stale is how the reference
-		// implementation produced spurious 403s.
-		legacy := ""
-		if len(in.RoleIDs) > 0 {
-			var first models.Role
-			if err := tx.Where("id = ?", in.RoleIDs[0]).First(&first).Error; err == nil {
-				legacy = strings.ToUpper(first.Name)
-			}
-		}
-		return tx.Model(&models.User{}).Where("id = ?", userID).Update("role", legacy).Error
-	})
-	if err != nil {
+	// The assignments and the legacy users.role column are one change: see
+	// ReplaceUserRoles.
+	if err := h.roles().ReplaceUserRoles(c.Request.Context(), userID, in.RoleIDs); err != nil {
 		respond.Internal(c, err)
 		return
 	}
-	authz.Invalidate()
 
 	respond.OK(c, gin.H{"user_id": userID, "role_ids": in.RoleIDs}, "Roles updated")
 }

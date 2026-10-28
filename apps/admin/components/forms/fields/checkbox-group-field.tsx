@@ -65,7 +65,7 @@ export function CheckboxGroupField({ field, value, onChange, error }: CheckboxGr
               <span
                 className={
                   "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded border-2 transition-colors " +
-                  (checked ? "border-accent bg-accent text-white" : "border-border")
+                  (checked ? "border-accent bg-accent text-accent-fg" : "border-border")
                 }
               >
                 {checked && (

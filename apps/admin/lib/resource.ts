@@ -231,6 +231,15 @@ export interface TableDefinition {
     excel?: boolean;
     fields?: string[];
   };
+  // Bulk Create: a spreadsheet for entering many rows at once, between Import
+  // (a file you already have) and New (one record). Defaults to enabled; set
+  // false where creating in bulk is not appropriate, such as a resource whose
+  // rows are made by the system rather than typed.
+  //
+  // The grid only shows fields a cell can hold. A rich text body, a line-items
+  // table or a JSON column stays in the form, and the grid says so rather than
+  // pretending the column is not there.
+  bulkCreate?: boolean;
 }
 
 // ─── Form Field Definitions ─────────────────────────────────────────
@@ -332,6 +341,37 @@ export interface FieldDefinition {
   // mint a code). text / number fields only. You define this by hand in the
   // resource definition; the generator never emits it.
   generate?: (values: Record<string, unknown>) => string | number | Promise<string | number>;
+
+  /**
+   * Whether this field applies at all, given what the rest of the form holds.
+   *
+   * A billing cycle belongs to a recurring project and means nothing on a
+   * one-off one. Returning false hides the input, drops the field's required
+   * rule, and sends the field's empty value rather than whatever it was last
+   * set to, so switching a project from recurring to one-off clears the cycle
+   * instead of leaving a stale one behind.
+   *
+   *   { key: "kind",  type: "select", options: [...] },
+   *   { key: "cycle", type: "select", options: [...],
+   *     visibleWhen: (v) => v.kind === "recurring",
+   *     requiredWhen: (v) => v.kind === "recurring" },
+   *
+   * The generator writes both of these, and the model tag that enforces the
+   * same rule for every other writer, from one modifier:
+   *
+   *   grit generate field Project "cycle:select:...:when=kind=recurring"
+   *
+   * This is the form's half. The rule still belongs in the service as well,
+   * because the API, a CSV import and a job never see this predicate.
+   */
+  visibleWhen?: (values: Record<string, unknown>) => boolean;
+
+  /**
+   * Required, but only sometimes. Takes precedence over required, and never
+   * applies while visibleWhen says the field is hidden: a question nobody
+   * can see must not be the reason a form will not submit.
+   */
+  requiredWhen?: (values: Record<string, unknown>) => boolean;
 
   /**
    * Shown, never sent. The value comes from the record, a column the server
@@ -466,6 +506,8 @@ export interface ResourceTableProps<T = Record<string, unknown>> {
   onEdit?: (item: T) => void;
   onDelete?: (id: string) => void;
   rowActions?: RowActionDefinition[];
+  /** Whether a search, a filter or a tab is narrowing these rows. */
+  isFiltered?: boolean;
 }
 
 /** Props a replacement form receives. Identical to FormSheet / FormModal. */
@@ -660,6 +702,9 @@ export interface ResourceDefinition {
   form: FormDefinition;
   dashboard?: DashboardDefinition;
   stats?: StatsConfig | boolean;
+  // The collapsible charts above the table. On by default, collapsed by
+  // default, and insights: false removes the panel entirely.
+  insights?: InsightsConfig | boolean;
   // Optional sidebar nav grouping. Resources sharing the same group key
   // render under a collapsible group header in the sidebar.
   group?: string;
@@ -686,6 +731,52 @@ export interface ResourceDefinition {
 export interface StatsConfig {
   enabled?: boolean;
   cards?: StatCardConfig[];
+  // Columns to turn into one card per value: a boolean becomes two cards, a
+  // status with four values becomes four.
+  //
+  // "grit generate resource" fills this in from the model, because the columns
+  // worth counting are the ones it already knows are booleans or short
+  // enumerations. Set countBy: [] to keep the four defaults and nothing else.
+  countBy?: CountByConfig[];
+}
+
+// The charts in the collapsible panel above the table.
+//
+// They are drawn over the list's own query, so they describe the rows the table
+// is showing rather than the whole table. Nothing is requested until somebody
+// opens the panel.
+export interface InsightsConfig {
+  // false removes the panel. Omitted means on.
+  enabled?: boolean;
+  // The timestamp the time series counts by: created_at or updated_at.
+  field?: "created_at" | "updated_at";
+  // Which period to start on. The viewer can switch.
+  unit?: "day" | "week" | "month";
+  // How many periods. Defaults to a sensible number per unit, capped at 60.
+  buckets?: number;
+  // Columns to chart by value, up to three. They must be filterable on the
+  // API, which is the whitelist ?breakdown= is checked against.
+  breakdown?: string[];
+  // What to call each value, per column: { status: { "1": "Active" } }.
+  labels?: Record<string, Record<string, string>>;
+}
+
+// One column counted by value.
+export interface CountByConfig {
+  // The column, which must be filterable on the API: that is the whitelist
+  // ?breakdown= is checked against.
+  field: string;
+  // Shown before the value when the value alone would not read: "Role: Admin".
+  // Omitted for a boolean, where "Active" and "Inactive" say it themselves.
+  label?: string;
+  // What to call each value. Databases disagree about booleans (true on
+  // Postgres, 1 on SQLite and MySQL), so both spellings map to the same card.
+  labels?: Record<string, string>;
+  // Only these values get a card, in this order. Without it every value the
+  // API returned gets one, largest first.
+  only?: string[];
+  icon?: string;
+  color?: "default" | "success" | "warning" | "danger" | "info";
 }
 
 export interface StatCardConfig {

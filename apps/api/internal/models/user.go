@@ -159,6 +159,12 @@ func Models() []interface{} {
 		&Participant{},
 		&Message{},
 		&PushToken{},
+		&MagicLinkToken{},
+		// Sagas: the multi-step processes that have to finish or be undone, and
+		// the step-by-step record of each run. Here like every other table, so
+		// AutoMigrate creates them and a backup includes them.
+		&SagaRun{},
+		&SagaStep{},
 		// grit:models
 	}
 }

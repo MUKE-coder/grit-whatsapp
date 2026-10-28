@@ -59,7 +59,7 @@ export function MultiRelationshipSelectField({
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(0);
   const [creating, setCreating] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0, width: 0 });
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 340 });
 
   // Records created inline, kept until the refetch returns them — otherwise a
   // record you just made vanishes from the list for a moment.
@@ -140,11 +140,26 @@ export function MultiRelationshipSelectField({
     return target ? { [displayField]: q } : undefined;
   }, [search, relatedResource, displayField]);
 
+  // Below when there is room, above when there is not. Same reason as the
+  // single picker: the panel is portalled, so a list that opens past the
+  // bottom edge cannot be scrolled to.
   const updatePosition = useCallback(() => {
     const el = triggerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setPosition({ top: r.bottom + window.scrollY + 4, left: r.left + window.scrollX, width: r.width });
+    const gutter = 8;
+    const below = window.innerHeight - r.bottom - gutter;
+    const above = r.top - gutter;
+    const minimum = 180;
+    const flip = below < minimum && above > below;
+    const height = Math.min(Math.max((flip ? above : below) - 4, 120), 340);
+    const top = flip ? r.top - height - 4 : r.bottom + 4;
+    setPosition({
+      top: top + window.scrollY,
+      left: r.left + window.scrollX,
+      width: r.width,
+      maxHeight: height,
+    });
   }, []);
 
   const openList = useCallback(() => {
@@ -247,10 +262,10 @@ export function MultiRelationshipSelectField({
       ? createPortal(
           <div
             ref={listRef}
-            style={{ position: "absolute", top: position.top, left: position.left, width: position.width, zIndex: 9999 }}
-            className="overflow-hidden rounded-md border border-border bg-bg-elevated shadow-lg"
+            style={{ position: "absolute", top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight, zIndex: 9999 }}
+            className="flex flex-col overflow-hidden rounded-md border border-border bg-bg-elevated shadow-lg"
           >
-            <div className="border-b border-border p-2">
+            <div className="shrink-0 border-b border-border p-2">
               <input
                 ref={searchRef}
                 value={search}
@@ -275,7 +290,7 @@ export function MultiRelationshipSelectField({
               role="listbox"
               aria-multiselectable="true"
               aria-label={field.label}
-              className="max-h-60 overflow-y-auto p-1"
+              className="min-h-0 flex-1 overflow-y-auto p-1"
             >
               {isLoading ? (
                 <div className="px-3 py-2 text-sm text-text-secondary">Loading...</div>
@@ -306,7 +321,7 @@ export function MultiRelationshipSelectField({
                       <span
                         className={
                           "flex h-4 w-4 shrink-0 items-center justify-center rounded border " +
-                          (isSelected ? "border-accent bg-accent text-white" : "border-border")
+                          (isSelected ? "border-accent bg-accent text-accent-fg" : "border-border")
                         }
                       >
                         {isSelected && <Check className="h-3 w-3" aria-hidden="true" />}
@@ -382,7 +397,7 @@ export function MultiRelationshipSelectField({
               type="button"
               onClick={() => toggleItem(id)}
               aria-label={"Remove " + label}
-              className="ml-0.5 rounded-full p-0.5 hover:bg-danger/20 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="ml-0.5 rounded-full p-0.5 hover:bg-danger/20 hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
               <X className="h-3 w-3" aria-hidden="true" />
             </button>
@@ -404,7 +419,7 @@ export function MultiRelationshipSelectField({
               openList();
             }
           }}
-          className="flex-1 rounded px-1 py-0.5 text-left text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex-1 rounded px-1 py-0.5 text-left text-text-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           {selectedLabels.length > 0 ? "Add more..." : "Select " + (field.label ?? "") + "..."}
         </button>

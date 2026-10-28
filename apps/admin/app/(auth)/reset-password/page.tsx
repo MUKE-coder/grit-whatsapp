@@ -8,6 +8,7 @@ import { z } from "zod";
 import { apiClient } from "@/lib/api-client";
 import { getApiErrorMessage } from "@/lib/api-core";
 import { AuthShell } from "@/components/auth/AuthShell";
+import { PasswordStrength } from "@/components/password-strength";
 
 const inputBase =
   "w-full rounded-[var(--auth-radius)] border bg-[var(--auth-card)] px-4 py-3 text-[var(--auth-fg)] placeholder:text-[var(--auth-muted)] focus:outline-none focus:ring-2 transition-colors";
@@ -34,9 +35,14 @@ function ResetPasswordForm() {
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  const { register, handleSubmit, formState: { errors } } = useForm<FormValues>({
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(FormSchema),
   });
+
+  // watch rather than formState, so the meter moves while they type instead of
+  // after a blur. There is no email or name to compare against on this screen:
+  // the reset link is all the page knows about who is using it.
+  const password = watch("password") ?? "";
 
   const onSubmit = async (data: FormValues) => {
     setError("");
@@ -103,9 +109,11 @@ function ResetPasswordForm() {
               {...register("password")}
               className={errors.password ? inputErr : inputOk}
               placeholder="At least 8 characters"
+              aria-describedby="password-strength"
               autoFocus
             />
             {errors.password && <p className="text-sm text-red-500">{errors.password.message}</p>}
+            <PasswordStrength value={password} />
           </div>
 
           <div className="space-y-2">

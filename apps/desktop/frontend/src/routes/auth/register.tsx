@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 import { useRegister } from "@/hooks/use-auth";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { authInputCls, authInputStyle, AuthSubmit } from "@/components/auth/AuthField";
+import { PasswordStrength } from "@/components/password-strength";
 
 export const Route = createFileRoute("/auth/register")({
   component: RegisterPage,
@@ -24,7 +25,7 @@ function RegisterPage() {
   const navigate = useNavigate();
   const { mutate: registerUser, isPending, error } = useRegister();
 
-  const { register, handleSubmit, formState: { errors } } = useForm<RegisterInput>({
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<RegisterInput>({
     resolver: zodResolver(RegisterSchema),
   });
 
@@ -61,8 +62,12 @@ function RegisterPage() {
 
         <div className="space-y-1.5">
           <label className="block text-sm font-medium">Password</label>
-          <input type="password" autoComplete="new-password" placeholder="At least 8 characters" className={authInputCls} style={authInputStyle} {...register("password")} />
+          <input type="password" autoComplete="new-password" aria-describedby="password-strength" placeholder="At least 8 characters" className={authInputCls} style={authInputStyle} {...register("password")} />
           {errors.password && <p className="text-xs text-[#dc2626]">{errors.password.message}</p>}
+          <PasswordStrength
+            value={watch("password") ?? ""}
+            about={[watch("email") ?? "", watch("first_name") ?? "", watch("last_name") ?? ""]}
+          />
         </div>
 
         <AuthSubmit disabled={isPending}>

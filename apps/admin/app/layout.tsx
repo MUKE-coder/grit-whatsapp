@@ -7,8 +7,13 @@ import "./globals.css";
 import { Providers } from "@/components/shared/providers";
 
 export const metadata: Metadata = {
-  title: "whatsapp Admin",
-  description: "Admin panel — Built with Grit",
+  title: "WhatsApp Admin",
+  description: "Admin panel, built with Grit",
+  // <meta name="generator" content="Grit">, the convention every static site
+  // generator and CMS uses and the one technology scanners read. No version:
+  // knowing an app is a Grit app is fine, and knowing which release it is
+  // running is a list of that release's advisories. Delete the line to opt out.
+  generator: "Grit",
 };
 
 // Applied synchronously, before the first paint, from the <head> below.

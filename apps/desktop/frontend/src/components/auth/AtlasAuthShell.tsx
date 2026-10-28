@@ -24,7 +24,7 @@ export function AtlasAuthShell({ theme, mode, title, subtitle, children, errorMe
         style={{ background: t.heroBg, color: t.heroFg }}
       >
         <div className="flex items-center gap-2 text-2xl font-bold">
-          <BrandMark />
+          <BrandMark tint={t.primary} fg={t.primaryFg} />
           <span style={{ fontFamily: f.display }}>{brand.name}</span>
         </div>
 
@@ -38,14 +38,14 @@ export function AtlasAuthShell({ theme, mode, title, subtitle, children, errorMe
           <p className="text-lg opacity-80">{brand.description}</p>
         </div>
 
-        <p className="text-sm opacity-60">Built with Grit — Go + React framework</p>
+        <p className="text-sm opacity-60">Built with Grit: Go + React framework</p>
       </div>
 
       {/* Right form panel */}
       <div className="flex flex-1 items-center justify-center px-6 py-12" style={{ background: t.bg }}>
         <div className="w-full max-w-md space-y-8">
           <div className="lg:hidden flex items-center justify-center gap-2 text-2xl font-bold" style={{ color: t.primary }}>
-            <BrandMark tint={t.primary} />
+            <BrandMark tint={t.primary} fg={t.primaryFg} />
             <span style={{ fontFamily: f.display }}>{brand.name}</span>
           </div>
 

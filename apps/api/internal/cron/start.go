@@ -20,7 +20,7 @@ func Start(cfg *config.Config, _ *cache.Cache) (*Scheduler, error) {
 		return nil, nil
 	}
 
-	s, err := New(cfg.RedisURL)
+	s, err := New(cfg.RedisURL, cfg.SecurityAutoBanEvery)
 	if err != nil {
 		return nil, err
 	}

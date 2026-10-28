@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -188,4 +189,73 @@ type AccessReviewSummary struct {
 	PendingItems  int64 `json:"pending_items"`
 	ApprovedItems int64 `json:"approved_items"`
 	RevokedItems  int64 `json:"revoked_items"`
+}
+
+// AccessReviewSummaries returns every campaign newest first, each with its
+// decision counts.
+//
+// Two queries, whatever the number of campaigns. The handler ran four counts per
+// campaign, so a year of monthly reviews was forty-nine queries to draw one
+// page, and every one of them discarded its error: a count that failed drew a
+// campaign as having no items at all, which in an access review reads as nothing
+// left to certify.
+func AccessReviewSummaries(ctx context.Context, db *gorm.DB) ([]AccessReviewSummary, error) {
+	var reviews []models.AccessReview
+	// Newest first, and by id within a second, because two campaigns opened in
+	// the same second ordered arbitrarily: the ids Grit issues are time-ordered,
+	// so they break the tie the way a reader expects. Found by a test that passed
+	// alone and failed in a full run, which is the same ambiguity an operator
+	// meets as a list that reorders itself between refreshes.
+	if err := db.WithContext(ctx).Order("created_at desc, id desc").Find(&reviews).Error; err != nil {
+		return nil, err
+	}
+
+	type tally struct {
+		ReviewID string
+		Decision string
+		N        int64
+	}
+	var rows []tally
+	if err := db.WithContext(ctx).Model(&models.AccessReviewItem{}).
+		Select("review_id, decision, count(*) as n").
+		Group("review_id, decision").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	counted := make(map[string]map[string]int64, len(reviews))
+	for _, r := range rows {
+		if counted[r.ReviewID] == nil {
+			counted[r.ReviewID] = map[string]int64{}
+		}
+		counted[r.ReviewID][r.Decision] = r.N
+	}
+
+	out := make([]AccessReviewSummary, 0, len(reviews))
+	for _, r := range reviews {
+		byDecision := counted[r.ID]
+		s := AccessReviewSummary{
+			AccessReview:  r,
+			PendingItems:  byDecision["pending"],
+			ApprovedItems: byDecision["approved"],
+			RevokedItems:  byDecision["revoked"],
+		}
+		// The total is every decision there is, including any a later release
+		// adds, rather than the three named above plus a separate count.
+		for _, n := range byDecision {
+			s.TotalItems += n
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// AccessReviewWithItems reads one campaign and its items, in the order the
+// reviewer works through them: by person, then by role.
+func AccessReviewWithItems(ctx context.Context, db *gorm.DB, id string) (*models.AccessReview, error) {
+	var review models.AccessReview
+	if err := db.WithContext(ctx).Preload("Items", func(q *gorm.DB) *gorm.DB {
+		return q.Order("user_email asc, role_name asc")
+	}).First(&review, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+	return &review, nil
 }

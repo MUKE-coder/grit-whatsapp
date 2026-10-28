@@ -145,7 +145,7 @@ export function NotificationBell() {
             <Link
               href="/system/notifications"
               onClick={() => setOpen(false)}
-              className="text-xs font-medium text-accent hover:text-accent-hover"
+              className="inline-flex min-h-[24px] items-center text-xs font-medium text-accent hover:text-accent-hover"
             >
               View all notifications
             </Link>

@@ -93,6 +93,8 @@ export type ApiErrorCode =
   | 'PASSKEY_REJECTED'
   | 'PASSWORD_REQUIRED'
   | 'PAYLOAD_TOO_LARGE'
+  | 'PAYMENTS_UNAVAILABLE'
+  | 'PAYMENT_PROVIDER_ERROR'
   | 'PDF_ERROR'
   | 'PERSIST_FAILED'
   | 'PRESIGN_FAILED'
@@ -629,6 +631,20 @@ export const API_ERRORS: Record<ApiErrorCode, ApiErrorInfo> = {
     area: 'core',
     meaning: 'The request body is larger than the server accepts.',
     client: 'Send less, or upload the file directly to storage with a presigned URL.',
+  },
+  PAYMENTS_UNAVAILABLE: {
+    status: 503,
+    category: 'disabled',
+    area: 'payments',
+    meaning: 'No payment provider is configured here: STRIPE_SECRET_KEY is not set.',
+    client: 'Hide checkout unless payments are configured. Nothing the client sends will fix it.',
+  },
+  PAYMENT_PROVIDER_ERROR: {
+    status: 502,
+    category: 'upstream',
+    area: 'payments',
+    meaning: 'Stripe refused or failed the request. The message carries what Stripe said.',
+    client: 'Retry once. Nobody has been charged: a payment is only taken when the customer confirms it.',
   },
   PDF_ERROR: {
     status: 500,

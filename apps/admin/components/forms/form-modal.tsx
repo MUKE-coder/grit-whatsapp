@@ -56,7 +56,9 @@ export function FormModal<T extends object = Record<string, unknown>>({
               : t("form.createTitle", "Create {name}", { name: resource.label?.singular ?? resource.name })}
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="Close"
             className="rounded-lg p-1 text-text-secondary hover:bg-bg-hover hover:text-foreground transition-colors"
           >
             <X className="h-5 w-5" />

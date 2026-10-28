@@ -86,6 +86,19 @@ type Params struct {
 	// Total. The admin's stat cards ask for theirs on the list request rather
 	// than sending a request per card.
 	Counts []string
+
+	// Series asks for a count per period, from ?series=: created_at:month:12
+	// is the last twelve months by the month a row was created. The column is
+	// created_at or updated_at, the unit is day, week or month.
+	//
+	// Raw as it arrived, because what is allowed depends on Config, which
+	// ParamsFrom does not have. List parses it.
+	Series string
+
+	// Breakdown asks for a count per value of a column, from ?breakdown=:
+	// status,role is how many rows hold each status and each role. Only
+	// columns in Config.Filterable are answered.
+	Breakdown string
 }
 
 // With returns a copy of Params with an additional filter applied.
@@ -198,6 +211,14 @@ type Meta struct {
 
 	// Counts answers ?counts=, keyed by the names asked for. See Params.Counts.
 	Counts map[string]int64 `json:"counts,omitempty"`
+
+	// Series answers ?series=: one entry per period that has rows, oldest
+	// first. Absent when the request did not ask.
+	Series []Bucket `json:"series,omitempty"`
+
+	// Breakdown answers ?breakdown=: the values of each column asked for, with
+	// how many rows hold each, largest first.
+	Breakdown map[string][]Slice `json:"breakdown,omitempty"`
 }
 
 // Result wraps the paginated data in the canonical { data, meta } envelope.
@@ -271,6 +292,8 @@ func Bind(c *gin.Context) Params {
 		DateTo:       dateTo,
 		QueryFilters: collectQueryFilters(c),
 		Counts:       parseCounts(c.Query("counts")),
+		Series:       c.Query("series"),
+		Breakdown:    c.Query("breakdown"),
 	}
 }
 
@@ -284,7 +307,7 @@ var reservedParams = map[string]bool{
 	"mode":          true,
 	"created_since": true, "created_from": true, "created_to": true,
 	"updated_since": true, "archived": true, "format": true,
-	"counts": true,
+	"counts": true, "series": true, "breakdown": true,
 }
 
 func collectQueryFilters(c *gin.Context) map[string]string {
@@ -403,6 +426,132 @@ func isSafeDateColumn(col string, cfg Config) bool {
 //   - sort_by must be in cfg.Sortable, else cfg.DefaultSort (or DefaultSortColumn)
 //   - sort_order must be "asc" or "desc", else cfg.DefaultOrder (or DefaultSortOrder)
 //   - search is applied case-insensitively across cfg.Searchable columns (nothing if empty)
+//
+// orderStably sorts by the requested column and then by id.
+//
+// The second column is not decoration. Without it, rows that share a value in
+// the sort column have no defined order at all, and the database is entitled
+// to return them differently for every query. Postgres does exactly that as
+// soon as the table is big enough to plan a parallel external sort: the order
+// of tied rows then depends on which worker finished first.
+//
+// What that looks like from outside is a list that quietly repeats a row on
+// one page and never shows another, with no error anywhere. Measured on
+// 500,000 contacts with repeating names (grit#112).
+//
+// id breaks every tie because it is unique, so the full ordering is total and
+// the same for every query. Skipped when the sort is already id, which would
+// otherwise emit "ORDER BY id asc, id asc".
+//
+// One function for both the page-numbered and the cursor path, because the
+// cursor path had this and the page path did not, and nothing compared them.
+func orderStably(query *gorm.DB, sortBy, sortOrder string) *gorm.DB {
+	query = query.Order(sortBy + " " + sortOrder)
+	if sortBy != "id" {
+		query = query.Order("id " + sortOrder)
+	}
+	return query
+}
+
+// deepPageOffset is where OFFSET stops being free and the deferred join
+// starts paying for its second round trip.
+//
+// Below it, one query is cheaper: the extra round trip costs more than the
+// rows OFFSET throws away. Above it, OFFSET is reading and discarding enough
+// of the table that two queries win by an order of magnitude. 1,000 is about
+// where the two cross on Postgres with a 25-row page; it is not a precise
+// number and does not need to be, because the curve is flat on both sides of
+// it.
+const deepPageOffset = 1000
+
+// fetchPage reads one page of rows, by OFFSET or by a deferred join.
+//
+// ── Why a deep page is slow ──────────────────────────────────────────────
+//
+// SELECT * ... ORDER BY name LIMIT 25 OFFSET 499950 makes Postgres fetch
+// every one of those 499,950 earlier rows FROM THE TABLE, not just from the
+// index, and throw them away. An index on the sort column does not help,
+// because the planner still has to visit the heap for each row it skips.
+// Page 1 is 9ms; page 20,000 is 1.6s, and every "last page" click pays it
+// (grit#121).
+//
+// ── What the deferred join does ──────────────────────────────────────────
+//
+// It asks for the primary keys first. That query touches only the index, so
+// skipping 499,950 entries is an index walk rather than half a million heap
+// fetches. Then it reads the 25 full rows by key. Same page, 0.15s cold.
+//
+// Two queries rather than one JOIN against a subquery, deliberately: the
+// caller's query arrives with its own scopes, conditions and Preload chains
+// already set, and reusing it as-is means the second query is exactly the
+// query the handler asked for. It also works unchanged on SQLite, where a
+// lateral join would not.
+//
+// ── The index this needs ─────────────────────────────────────────────────
+//
+// The gain depends on the key query being answerable from an index ALONE.
+// Every list here carries a deleted_at IS NULL test, so a plain
+// (org_id, name, id) index still visits the table to check it and the
+// deferred join buys nothing. The index has to be partial:
+//
+//	CREATE INDEX idx_contacts_list ON contacts (org_id, name, id)
+//	  WHERE deleted_at IS NULL;
+//
+// See the pagination docs. Without it this is correct but no faster.
+func fetchPage[T any](query *gorm.DB, dest *[]T, offset, limit int, sortBy, sortOrder string) error {
+	if offset < deepPageOffset {
+		return orderStably(query, sortBy, sortOrder).
+			Offset(offset).
+			Limit(limit).
+			Find(dest).Error
+	}
+
+	// The table and primary key of whatever model the caller set. Qualified
+	// with the table name because a handler may have joined another table
+	// that also has an id.
+	stmt := query.Statement
+	if stmt == nil || stmt.Schema == nil || stmt.Schema.PrioritizedPrimaryField == nil {
+		// No schema to work from: fall back rather than guess at a key name.
+		return orderStably(query, sortBy, sortOrder).
+			Offset(offset).
+			Limit(limit).
+			Find(dest).Error
+	}
+	key := stmt.Table + "." + stmt.Schema.PrioritizedPrimaryField.DBName
+
+	// The key query needs its own Statement, not the caller's.
+	//
+	// Session(&gorm.Session{}) shares the statement pointer, so clearing
+	// preloads on it clears them on the caller's query too and the row query
+	// below comes back with empty associations. Passing a Context is what
+	// makes GORM clone the statement instead of aliasing it: conditions and
+	// scopes are copied, and what happens next is local to this query.
+	//
+	// Preloads are then cleared, because the key query returns scalars and
+	// running a handler's Preload chain to throw the result away is exactly
+	// the cost this function exists to avoid. Select narrows it to the key,
+	// so the database can answer from an index.
+	keyQuery := query.Session(&gorm.Session{Context: stmt.Context})
+	keyQuery.Statement.Preloads = map[string][]interface{}{}
+
+	var ids []interface{}
+	if err := orderStably(keyQuery.Select(key), sortBy, sortOrder).
+		Offset(offset).
+		Limit(limit).
+		Pluck(key, &ids).Error; err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		// Past the end. Leave dest as the empty slice the caller gave us
+		// rather than running a WHERE id IN () that some drivers reject.
+		return nil
+	}
+
+	// The rows, by key, through the caller's query so its preloads run.
+	return orderStably(query.Where(key+" IN ?", ids), sortBy, sortOrder).
+		Find(dest).Error
+}
+
 func List[T any](query *gorm.DB, p Params, cfg Config) (Result[T], error) {
 	// Normalize sort_by against the whitelist.
 	sortBy := p.SortBy
@@ -539,13 +688,28 @@ func List[T any](query *gorm.DB, p Params, cfg Config) (Result[T], error) {
 		result.Meta.Counts = counts
 	}
 
-	// Then fetch the page.
+	// The insights panel's chart, over this same query: the rows the table is
+	// showing, not the whole table. Collapsed by default in the admin, so the
+	// GROUP BY runs when somebody opens the panel and not before.
+	if spec, ok := parseSeries(p.Series); ok {
+		series, err := seriesBuckets(query, spec)
+		if err != nil {
+			return result, err
+		}
+		result.Meta.Series = series
+	}
+	if columns := parseBreakdown(p.Breakdown, cfg.Filterable); len(columns) > 0 {
+		breakdown, err := breakdownSlices(query, columns)
+		if err != nil {
+			return result, err
+		}
+		result.Meta.Breakdown = breakdown
+	}
+
+	// Then fetch the page. A deep page goes through a deferred join; see
+	// fetchPage for why, and for the index it needs to actually be faster.
 	offset := (p.Page - 1) * p.PageSize
-	if err := query.
-		Order(sortBy + " " + sortOrder).
-		Offset(offset).
-		Limit(p.PageSize).
-		Find(&result.Data).Error; err != nil {
+	if err := fetchPage(query, &result.Data, offset, p.PageSize, sortBy, sortOrder); err != nil {
 		return result, err
 	}
 
@@ -676,9 +840,7 @@ func listCursor[T any](query *gorm.DB, p Params, cfg Config, sortBy, sortOrder s
 	}
 
 	limit := p.PageSize + 1
-	if err := query.
-		Order(sortBy + " " + sortOrder).
-		Order("id " + sortOrder).
+	if err := orderStably(query, sortBy, sortOrder).
 		Limit(limit).
 		Find(&result.Data).Error; err != nil {
 		return result, err

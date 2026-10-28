@@ -15,7 +15,7 @@
 # machine, and cgo cannot cross-compile without a target toolchain.
 ARG IMAGE_BACKEND=purego
 
-FROM golang:1.26.6-alpine AS builder
+FROM golang:1.26.10-alpine AS builder
 
 WORKDIR /app
 
@@ -39,6 +39,10 @@ RUN apk --no-cache add ca-certificates tzdata
 # The vips build links against libvips, so the runtime image needs it too. The
 # default build is static and adds nothing.
 RUN if [ "$IMAGE_BACKEND" = "vips" ]; then apk --no-cache add vips; fi
+
+# Packages a plugin needs at runtime go here, such as ffmpeg for grit plugin
+# add video.
+# grit:runtime-packages
 
 # Non-root runtime user — Sentinel/Pulse open embedded SQLite stores under
 # /app, so chown before USER or those fail with the misleading

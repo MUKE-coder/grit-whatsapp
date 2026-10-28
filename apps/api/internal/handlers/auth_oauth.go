@@ -18,6 +18,16 @@ import (
 // Social login. The provider registry lives in services; this is the two
 // endpoints the browser actually visits.
 
+// users is the service the account writes below go through. Built per request,
+// like every other accessor in this package, so routes.go did not have to change.
+//
+// The reads go through AuthService instead, which is where signing in already gets
+// them: UserByEmail answers an unknown address the same way whatever the caller,
+// which is the property this endpoint shares with the password step.
+func (h *AuthHandler) users() *services.UserService {
+	return &services.UserService{DB: h.DB}
+}
+
 // OAuthBegin redirects the user to the OAuth provider's consent screen.
 func (h *AuthHandler) OAuthBegin(c *gin.Context) {
 	provider := c.Param("provider")
@@ -55,10 +65,13 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 
 	// Find or create user by email
 	var user models.User
-	result := h.DB.WithContext(c.Request.Context()).Where("email = ?", gothUser.Email).First(&user)
+	existing, lookupErr := h.AuthService.UserByEmail(c.Request.Context(), gothUser.Email)
+	if existing != nil {
+		user = *existing
+	}
 
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+	if lookupErr != nil {
+		if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
 			// Create new user from OAuth data
 			now := time.Now()
 			user = models.User{
@@ -89,14 +102,17 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 				user.LastName = ""
 			}
 
-			if err := h.DB.WithContext(c.Request.Context()).Create(&user).Error; err != nil {
+			// Through CreateUser, so two provider sign-ins for one new address in the
+			// same instant are settled by the unique index rather than by which read
+			// finished first.
+			if err := services.CreateUser(c.Request.Context(), h.DB, &user); err != nil {
 				log.Printf("OAuth: failed to create user: %v", err)
 				redirectURL := fmt.Sprintf("%s/login?error=%s", h.Config.OAuthFrontendURL, url.QueryEscape("Failed to create account."))
 				c.Redirect(http.StatusTemporaryRedirect, redirectURL)
 				return
 			}
 		} else {
-			log.Printf("OAuth: database error: %v", result.Error)
+			log.Printf("OAuth: database error: %v", lookupErr)
 			redirectURL := fmt.Sprintf("%s/login?error=%s", h.Config.OAuthFrontendURL, url.QueryEscape("Something went wrong."))
 			c.Redirect(http.StatusTemporaryRedirect, redirectURL)
 			return
@@ -108,7 +124,7 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 		// stops working and its sessions end before the provider is linked.
 		if user.EmailVerifiedAt == nil {
 			verifiedAt := time.Now()
-			if err := h.DB.WithContext(c.Request.Context()).Model(&user).Updates(map[string]interface{}{"password": "", "email_verified_at": verifiedAt}).Error; err != nil {
+			if err := h.users().Update(c.Request.Context(), &user, map[string]interface{}{"password": "", "email_verified_at": verifiedAt}, ""); err != nil {
 				log.Printf("oauth: securing unverified account %s: %v", user.ID, err)
 				redirectURL := fmt.Sprintf("%s/login?error=%s", h.Config.OAuthFrontendURL, url.QueryEscape("Something went wrong."))
 				c.Redirect(http.StatusTemporaryRedirect, redirectURL)
@@ -135,7 +151,7 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 		}
 
 		if len(updates) > 0 {
-			if err := h.DB.WithContext(c.Request.Context()).Model(&user).Updates(updates).Error; err != nil {
+			if err := h.users().Update(c.Request.Context(), &user, updates, ""); err != nil {
 				log.Printf("oauth: linking %s to user %s: %v", provider, user.ID, err)
 			}
 		}
@@ -146,6 +162,10 @@ func (h *AuthHandler) OAuthCallback(c *gin.Context) {
 		c.Redirect(http.StatusTemporaryRedirect, redirectURL)
 		return
 	}
+
+	// What the provider knew, handed to whatever this app wants to do with it:
+	// the GitHub login, the avatar, the locale. See services.OnOAuthLogin.
+	services.RunOAuthLoginHooks(c.Request.Context(), &user, gothUser)
 
 	// Generate JWT tokens
 	tokens, err := h.AuthService.GenerateTokenPair(user.ID, user.Email, user.Role)

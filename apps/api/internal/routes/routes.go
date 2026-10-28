@@ -36,6 +36,16 @@ import (
 	"whatsapp/apps/api/internal/webhooks"
 	// Imports added by plugins.
 	// grit:imports
+
+	"whatsapp/apps/api/internal/health"
+
+	"whatsapp/apps/api/internal/llms"
+
+	"whatsapp/apps/api/internal/paginate"
+
+	"whatsapp/apps/api/internal/saga"
+
+	"whatsapp/apps/api/internal/sagas"
 )
 
 // splitOrigins parses the cors.origins setting.
@@ -63,20 +73,55 @@ func splitOrigins(raw string) []string {
 //
 // Nil-safe so a project whose routes.go predates events.Init still answers
 // the health check rather than panicking on it.
-func eventBusStatus() interface{} {
+func eventBusStatus() health.Report {
 	bus := events.Default()
 	if bus == nil {
-		return map[string]interface{}{"ok": false, "configured": false}
+		return health.Off("no event bus is running")
 	}
 	s := bus.Stats()
-	return map[string]interface{}{
-		"ok":          s.Dropped == 0,
+	return health.OK("", map[string]any{
 		"configured":  true,
 		"subscribers": s.Subscribers,
 		"queued":      s.Queued,
 		"capacity":    s.Capacity,
 		"dropped":     s.Dropped,
+	})
+}
+
+// registerLLMSFiles serves /llms.txt and /llms-full.txt.
+//
+// The route table is read on each request rather than cached. It is a few
+// hundred entries and these two paths are not on a hot path, and a cache here
+// would be a copy that goes stale the first time something registers a route
+// after boot.
+func registerLLMSFiles(r *gin.Engine, cfg *config.Config) {
+	conf := llms.Config{
+		AppName:     cfg.AppName,
+		BaseURL:     cfg.AppURL,
+		Version:     APIVersion,
+		MaxPageSize: paginate.MaxPageSize,
 	}
+	// Collected once per request from the engine, so a route a plugin or your
+	// own code adds is in the file without anybody maintaining a list.
+	table := func() []llms.Route {
+		infos := r.Routes()
+		out := make([]llms.Route, 0, len(infos))
+		for _, info := range infos {
+			out = append(out, llms.Route{
+				Method:  info.Method,
+				Path:    info.Path,
+				Handler: llms.ShortHandlerName(info.Handler),
+			})
+		}
+		return out
+	}
+
+	r.GET("/llms.txt", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(llms.Index(conf)))
+	})
+	r.GET("/llms-full.txt", func(c *gin.Context) {
+		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(llms.Full(conf, table())))
+	})
 }
 
 // APIVersion is the version segment every /api route is served under, so the
@@ -138,12 +183,30 @@ func wafExcludedRoutes() []string {
 		// (optional) and the token itself; Sentinel rate-limits the path. The
 		// subtree match also covers .../submit.
 		"/public/forms/*",
+		"/admin/blogs", "/admin/blogs/*",
+		"/admin/posts", "/admin/posts/*",
+		"/admin/articles", "/admin/articles/*",
+		// grit generate resource adds a resource here when it emits a richtext
+		// field. Add one by hand if a plain text column carries code or markup
+		// that the heuristics read as an attack.
+		// grit:waf:richtext
 	}
-	out := make([]string, 0, len(paths))
+	out := make([]string, 0, len(paths)+2)
 	for _, p := range paths {
 		out = append(out, prefix+p)
 	}
-	return out
+	// The local storage driver's file route, which is mounted on the engine
+	// rather than under the API prefix, so it must not be run through it.
+	// It serves a stored object under the key it was stored with, and an
+	// "accepts all" upload field keeps a file's original extension, so a
+	// stored config.env is a real path this app has to answer. Sentinel
+	// v2.8.0 reads any path ending in .env as an env-file probe, and in
+	// production the WAF blocks: that object answered 403.
+	//
+	// Traversal is not what is given up here. The storage layer refuses a key
+	// with a . or .. segment, a backslash, a Windows drive letter, or any key
+	// resolving outside the disk's root, whether or not the WAF is looking.
+	return append(out, "/files", "/files/*")
 }
 
 // Services holds all Phase 4 services for dependency injection.
@@ -227,6 +290,46 @@ func mountGlobalMiddleware(r *gin.Engine, cfg *config.Config, svc *Services) fun
 	r.Use(middleware.Idempotency(svc.Cache))
 
 	return corsOrigins
+}
+
+// autoBlockNeverBlocked are the addresses auto-block is never allowed to bar,
+// whatever they do.
+//
+// Auto-block bars an address, and an address is only the attacker's when
+// Sentinel is reading the real client. Behind a reverse proxy it has not been
+// told to trust, every request carries the proxy's own address instead, and
+// TrustedProxies is empty by default because trusting a forwarded header you
+// have not configured is worse. So on a deployment where Caddy, Traefik,
+// nginx or an ingress terminates TLS and SENTINEL_TRUSTED_PROXIES was never
+// set, ten probes through that proxy would bar the proxy: every user, for a
+// day, from one scanner.
+//
+// Loopback and the private ranges are where such a proxy appears, so they are
+// exempt. Nothing is given up by it that you would want: a client genuinely on
+// one of these ranges is on your own network, and barring one address there is
+// not the control you want anyway.
+//
+// Set SENTINEL_TRUSTED_PROXIES and the real client address is read, after
+// which this list stops applying to anybody who matters.
+var autoBlockNeverBlocked = []string{
+	"127.0.0.0/8", "::1/128",
+	"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+	"100.64.0.0/10", // carrier NAT, and what some ingress controllers use
+	"fc00::/7",      // IPv6 unique local
+}
+
+// autoBlockExempt is that list plus whatever this project named.
+func autoBlockExempt(cfg *config.Config) []string {
+	named := cfg.SentinelAutoBlockExemptIPs
+	if len(named) == 0 {
+		// Whose egress address is thousands of people is one question, and a
+		// project that answered it for the sign-in lockout has answered it for
+		// auto-block too. SENTINEL_AUTOBLOCK_EXEMPT_IPS parts them.
+		named = cfg.SentinelLockoutExemptIPs
+	}
+	out := make([]string, 0, len(autoBlockNeverBlocked)+len(named))
+	out = append(out, autoBlockNeverBlocked...)
+	return append(out, named...)
 }
 
 // mountSentinel mounts the security suite: WAF, rate limiting, auth shield and
@@ -355,6 +458,22 @@ func mountSentinel(r *gin.Engine, db *gorm.DB, cfg *config.Config, svc *Services
 				// v2.0 CAPTCHA tier sits between soft and hard thresholds.
 				// Wire a provider by setting CaptchaProvider in your app code.
 			},
+			// An address that keeps attacking is blocked, on what it has
+			// done to this application rather than on a third party's
+			// reputation feed, which is the only thing that stops a scanner
+			// nobody has reported yet. Sentinel's defaults: ten
+			// high-severity threats inside ten minutes bars the address for
+			// a day. A high severity is what the scanner patterns score (LFI,
+			// SQLi, path traversal), so ordinary odd traffic does not
+			// accumulate towards a block.
+			//
+			// Off in development, where the thing it would block is you.
+			// Counted through Counters above, so threats spread over replicas
+			// add up to one total and a block made anywhere holds everywhere.
+			AutoBlock: sentinel.AutoBlockConfig{
+				Enabled:   !isDev,
+				ExemptIPs: autoBlockExempt(cfg),
+			},
 			Anomaly: sentinel.AnomalyConfig{Enabled: !isDev},
 			Geo:     sentinel.GeoConfig{Enabled: !isDev},
 		}); err != nil {
@@ -416,6 +535,36 @@ func mountPulse(r *gin.Engine, db *gorm.DB, cfg *config.Config, svc *Services) {
 		if cfg.PulseStorage == "sqlite" && cfg.PulseStorageDSN != "" {
 			pulseOpts = append(pulseOpts, pulse.WithSQLite(cfg.PulseStorageDSN))
 		}
+
+		// The runtime's own profiles, from v1.3.0: heap, allocations, mutex,
+		// block and CPU, served as standard pprof protobuf so
+		// "go tool pprof http://host/pulse/api/profile/heap" works and
+		// -diff_base compares two captures.
+		//
+		// Two switches, not one, and deliberately so. This one is the config
+		// half; Pulse also refuses to sample unless PULSE_PROFILE_ENABLED is
+		// set in the environment. A profile leaks the shape of your code, so
+		// one forgotten setting should not be enough to expose it.
+		if cfg.PulseProfiling {
+			pulseOpts = append(pulseOpts, pulse.WithProfiling(), pulse.WithPprofHandlers())
+		}
+		// Mutex and block profiling cost the runtime something on every
+		// contended lock, so the runtime keeps them off and so do we. Set a
+		// fraction or a rate only while you are looking: these answer "what is
+		// contended", which nothing else here can.
+		if cfg.PulseMutexProfileFraction > 0 {
+			pulseOpts = append(pulseOpts, pulse.WithMutexProfiling(cfg.PulseMutexProfileFraction))
+		}
+		if cfg.PulseBlockProfileRate > 0 {
+			pulseOpts = append(pulseOpts, pulse.WithBlockProfiling(cfg.PulseBlockProfileRate))
+		}
+		// Ask the database for the plan behind a slow SELECT. Off by default
+		// because it issues extra queries against your database; when on it is
+		// EXPLAIN only, never EXPLAIN ANALYZE, so the slow query is not run a
+		// second time.
+		if cfg.PulseExplainSlowQueries {
+			pulseOpts = append(pulseOpts, pulse.WithExplainSlowQueries(0))
+		}
 		p := pulse.Mount(context.Background(), r, db, pulseOpts...)
 
 		// Register health checks for connected services
@@ -451,6 +600,11 @@ func mountAuthRoutes(v1 *gin.RouterGroup, authHandler *handlers.AuthHandler, sso
 		auth.POST("/forgot-password", authHandler.ForgotPassword)
 		auth.POST("/reset-password", authHandler.ResetPassword)
 		auth.POST("/verify-email", authHandler.VerifyEmail)
+		// Signing in with an emailed link. Consuming is a POST from the page
+		// the link opens, never the GET that opens it: mail scanners follow
+		// every URL in a message and would spend the token first.
+		auth.POST("/magic-link", authHandler.RequestMagicLink)
+		auth.POST("/magic-link/consume", authHandler.ConsumeMagicLink)
 	}
 
 	// OAuth2 social login
@@ -528,6 +682,14 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 		registerAPIDocs(r, db, cfg)
 	}
 
+	// llms.txt and llms-full.txt, for an agent pointed at this service.
+	//
+	// Beside the reference and gated with it: a route list is not a secret and
+	// is also not something to hand out by default. See internal/llms.
+	if cfg.AppEnv != "production" || cfg.APIDocsPublic {
+		registerLLMSFiles(r, cfg)
+	}
+
 	mountPulse(r, db, cfg, svc)
 
 	// Auth service
@@ -575,6 +737,11 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 		DB:          db,
 		AuthService: authService,
 		Issuer:      cfg.TOTPIssuer,
+		// For the email second factor: the same mailer and queue the auth
+		// handler uses, so a code goes out the way every other email does.
+		Config: cfg,
+		Mailer: svc.Mailer,
+		Jobs:   svc.Jobs,
 	}
 	// The passkey relying party, built once from the origins the frontends
 	// actually run on. A deployment with none (CORS_ORIGINS unset or '*')
@@ -616,6 +783,15 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	// replica runs one; row claims keep two from delivering a message twice.
 	events.StartRelay(db)
 
+	// Sagas: the multi-step processes that have to finish or be undone. Every
+	// replica runs a runner; a run is claimed before it is touched, so two of
+	// them cannot advance the same one and charge a card twice.
+	sagas.Register()
+	if len(saga.Registered()) > 0 {
+		(&saga.Runner{DB: db}).Start(context.Background())
+		log.Printf("Sagas: %d registered, runner started", len(saga.Registered()))
+	}
+
 	// Settings: declare, then open the store. Declaring after Init would mean
 	// a setting the first cache load never saw.
 	settings.RegisterDefaults()
@@ -646,7 +822,13 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	// In-app Security + Observability dashboards — read from Sentinel/Pulse APIs
 	// over loopback. notificationHandler powers the admin bell.
 	notificationHandler := &handlers.NotificationHandler{DB: db}
-	securityHandler := &handlers.SecurityHandler{Bridge: svc.SecObs}
+	// The dashboard's button and the scheduled job share one sweep, so the
+	// policy shown on the page is the policy that runs at 3am.
+	securityHandler := &handlers.SecurityHandler{
+		Bridge:       svc.SecObs,
+		AutoBan:      services.NewSecurityAutoBan(svc.SecObs, cfg),
+		AutoBanEvery: cfg.SecurityAutoBanEvery,
+	}
 	observabilityHandler := &handlers.ObservabilityHandler{Bridge: svc.SecObs}
 
 	// v3.30 — semantic activity log + ticket system. Mailer is optional;
@@ -680,8 +862,16 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	syncRegistry.Register("messages", &models.Message{})
 	// grit:sync
 	syncHandler := handlers.NewSyncHandler(db, syncRegistry)
+	// The bin reads the same registry: every resource that can be synced is a
+	// resource whose rows soft-delete, which is the same list.
+	trashHandler := handlers.NewTrashHandler(db, syncRegistry)
 	// v3.31.68 — shared background CSV import status endpoint
 	importJobHandler := &handlers.ImportJobHandler{DB: db}
+	// The saga runs screen. A run that goes stuck needs a person, and without a
+	// screen the only way to find one is SQL against saga_runs.
+	sagaHandler := &handlers.SagaHandler{DB: db}
+	// The Routes screen reads the router's own table. See internal/handlers.
+	routeExplorerHandler := &handlers.RouteExplorerHandler{Engine: r}
 	// v3.31.77 — full-database backups (weekly cron + manual + download)
 	backupHandler := &handlers.BackupHandler{DB: db, Storage: svc.Storage}
 	roleHandler := handlers.NewRoleHandler(db)
@@ -745,101 +935,138 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	// with a 404 behind it. /api/health stays for probes, load balancers and the
 	// desktop client's heartbeat, which are configured outside this repo.
 	healthCheck := func(c *gin.Context) {
-		type compStatus struct {
-			OK         bool   `json:"ok"`
-			LatencyMS  int64  `json:"latency_ms,omitempty"`
-			Tables     int    `json:"tables,omitempty"`
-			Queued     *int   `json:"queued,omitempty"`
-			Active     *int   `json:"active,omitempty"`
-			Configured bool   `json:"configured,omitempty"`
-			Driver     string `json:"driver,omitempty"`
-			Error      string `json:"error,omitempty"`
-		}
+		// Components answer in four states rather than a boolean: ok, degraded,
+		// off and unknown. See internal/health for which is which. "off" is a
+		// dependency this deployment never asked for and "unknown" is a probe
+		// that could not find out, so neither lowers the overall status; only
+		// "degraded" does.
+		//
+		// Snapshot runs whatever health.Register was given, from a plugin or
+		// from your own main.go, and those components are reported beside the
+		// framework's own.
+		comps := health.Snapshot()
 
-		// Database ping + table count. We probe with a 500ms deadline so a
-		// blocked write loop can't hang the health check.
-		dbStatus := compStatus{OK: true}
+		// The API answered this request, which is the whole of what it can
+		// honestly say about itself.
+		comps["api"] = health.OK("answering requests", nil)
+
+		// Database: a ping bounded at 500ms, so a blocked write loop cannot hang
+		// the health check, and a table count for the dashboard's tooltip.
 		dbStart := time.Now()
-		if sqlDB, err := db.DB(); err == nil {
+		if sqlDB, err := db.DB(); err != nil {
+			comps["database"] = health.Degraded("the database handle is not available", nil)
+		} else {
 			ctx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
 			defer cancel()
-			if err := sqlDB.PingContext(ctx); err != nil {
-				dbStatus.OK = false
-				log.Printf("health: database ping failed: %v", err)
+			pingErr := sqlDB.PingContext(ctx)
+			fields := map[string]any{"latency_ms": time.Since(dbStart).Milliseconds()}
+			if pingErr != nil {
+				// The error goes to the log and not into the response. A driver
+				// error names the host, the port and often the user, and this
+				// endpoint is public so a load balancer can reach it.
+				log.Printf("health: database ping failed: %v", pingErr)
+				comps["database"] = health.Degraded("the database did not answer a ping", fields)
+			} else {
+				// Best-effort table count. Dialect-aware, and 0 rather than an
+				// error when the database cannot be asked: a missing tooltip
+				// figure is not a health problem.
+				fields["tables"] = database.TableCount(db)
+				comps["database"] = health.OK("", fields)
 			}
 		}
-		dbStatus.LatencyMS = time.Since(dbStart).Milliseconds()
-		if dbStatus.OK {
-			// Best-effort table count. Dialect-aware, and 0 rather than an
-			// error when the database cannot be asked: a missing tooltip
-			// figure is not a health problem.
-			dbStatus.Tables = database.TableCount(db)
-		}
 
-		// Redis ping. Reuse the same cache client the rest of the app uses
-		// rather than opening a new connection — that way "Redis healthy"
-		// on the dashboard means the same Redis the cache + jobs use.
-		redisStatus := compStatus{}
-		if svc.Cache != nil {
+		// Redis: the same cache client the rest of the app uses, rather than a
+		// new connection, so "Redis healthy" here means the Redis the cache and
+		// the queue are actually on.
+		//
+		// A nil cache has two causes and they are not the same news. REDIS_URL=
+		// turned it off on purpose. Anything else means main.go dialled Redis at
+		// boot, was refused, and carried on with caching, jobs and cron off,
+		// which in production is an incident and on a laptop is Tuesday. That is
+		// the one thing in this report that asks which environment it is in.
+		switch {
+		case svc.Cache != nil:
 			redisStart := time.Now()
 			ctx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
 			defer cancel()
-			if err := svc.Cache.Client().Ping(ctx).Err(); err != nil {
-				redisStatus.OK = false
-				log.Printf("health: redis ping failed: %v", err)
+			pingErr := svc.Cache.Client().Ping(ctx).Err()
+			fields := map[string]any{"latency_ms": time.Since(redisStart).Milliseconds()}
+			if pingErr != nil {
+				log.Printf("health: redis ping failed: %v", pingErr)
+				comps["redis"] = health.Degraded("Redis did not answer a ping", fields)
 			} else {
-				redisStatus.OK = true
+				comps["redis"] = health.OK("", fields)
 			}
-			redisStatus.LatencyMS = time.Since(redisStart).Milliseconds()
+		case cfg.RedisURL == "":
+			comps["redis"] = health.Off("REDIS_URL is empty, so caching, jobs and cron are off on purpose")
+		case cfg.IsDevelopment():
+			comps["redis"] = health.Off("Redis was not reachable when the API started, so caching, jobs and cron are off; set REDIS_URL= in .env to mean it")
+		default:
+			// No address in the detail: this endpoint is public.
+			comps["redis"] = health.Degraded("Redis is configured and was not reachable when the API started, so caching, jobs and cron are off; restart the API once it answers", nil)
 		}
 
 		// Background jobs: up when Redis is, with queue counts from a snapshot
 		// refreshed in the background. Counting asynq's keys here ran KEYS inside
-		// Redis on every probe, stalling every Redis client while it ran. If asynq
-		// isn't wired (Jobs == nil), report unconfigured rather than "down" so the
-		// dashboard distinguishes the cases.
-		jobsStatus := compStatus{}
-		if svc.Jobs != nil && svc.Cache != nil {
-			jobsStatus.OK = redisStatus.OK
+		// Redis on every probe, stalling every Redis client while it ran, and
+		// anyone can call /api/health.
+		switch {
+		case svc.Jobs != nil && svc.Cache != nil:
 			if stats, ok := queueStats.Snapshot(); ok {
-				jobsStatus.Queued, jobsStatus.Active = &stats.Queued, &stats.Active
+				comps["jobs"] = health.OK("", map[string]any{"queued": stats.Queued, "active": stats.Active})
+			} else {
+				// The counts come from a background refresh, so the first probe
+				// after a restart has none yet. That is not the queue being
+				// unwell, which is the distinction "unknown" exists for.
+				comps["jobs"] = health.Unknown("the queue counts have not been sampled yet")
+			}
+		case comps["redis"].State == health.StateDegraded:
+			// The queue is missing because Redis is, and the Redis report has
+			// already said why in the words that fit this deployment.
+			comps["jobs"] = health.Degraded("the Redis the queue runs on is not there", nil)
+		default:
+			comps["jobs"] = health.Off("no queue: asynq needs Redis")
+		}
+
+		// Email names the driver main.go picked: smtp, resend, log and so on.
+		if svc.Mailer == nil {
+			comps["email"] = health.Off("no mailer is configured; set MAIL_MAILER")
+		} else {
+			comps["email"] = health.OK("", map[string]any{"configured": true, "driver": svc.Mailer.Driver()})
+		}
+
+		// Storage, which nothing reported until v3.350.0: an upload answered 503,
+		// the System Health page had nothing to say about why, and the answer was
+		// that no object store was configured in that environment at all.
+		//
+		// The driver's name only. Describe() also names the bucket and the
+		// endpoint, and this endpoint is public.
+		if svc.Storage == nil {
+			comps["storage"] = health.Off("no object store is configured; set STORAGE_DRIVER")
+		} else {
+			comps["storage"] = health.OK("", map[string]any{"configured": true, "driver": svc.Storage.Driver()})
+		}
+
+		// The event bus reports itself, because "did my webhook fire" deserves a
+		// better answer than reading logs.
+		comps["events"] = eventBusStatus()
+
+		body := gin.H{
+			"status":  health.Overall(comps),
+			"version": "0.1.0",
+			// This replica's sockets, and what its hub delivered, dropped and
+			// failed to publish to the others. Per process, not per deployment.
+			"realtime": realtimeHub.Stats(),
+		}
+		for name, report := range comps {
+			// A registered probe cannot take a key the handler already wrote. A
+			// plugin that calls itself "status" must not be able to tell a load
+			// balancer the deployment is fine.
+			if _, taken := body[name]; !taken {
+				body[name] = report
 			}
 		}
-
-		// Email is reported by the driver main.go picked: smtp, resend, log and
-		// so on. No mailer is "not configured", which the dashboard shows as a
-		// dash rather than as down.
-		mailStatus := compStatus{Configured: svc.Mailer != nil, OK: svc.Mailer != nil}
-		if svc.Mailer != nil {
-			mailStatus.Driver = svc.Mailer.Driver()
-		}
-
-		// Overall status — ok if every wired-up component is up. Components
-		// that aren't configured (e.g. Redis off in a single-binary dev
-		// run) don't drag the overall status down.
-		overall := "ok"
-		if !dbStatus.OK || (svc.Cache != nil && !redisStatus.OK) {
-			overall = "degraded"
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":   overall,
-			"version":  "0.1.0",
-			"database": dbStatus,
-			"redis":    redisStatus,
-			"api":      compStatus{OK: true},
-			"jobs":     jobsStatus,
-			"email":    mailStatus,
-			// The event bus reports itself. Dropped rising is the only signal
-			// from outside that a subscriber is too slow or the queue too
-			// small, and "did my webhook fire" deserves a better answer than
-			// reading logs.
-			"events": eventBusStatus(),
-
-			// This replica's sockets, and what its hub delivered, dropped and
-			// failed to publish to the others.
-			"realtime": realtimeHub.Stats(),
-		})
+		c.JSON(http.StatusOK, body)
 	}
 	r.GET("/api/health", healthCheck)
 	r.GET("/api/"+APIVersion+"/health", healthCheck)
@@ -850,6 +1077,9 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 	// path answers 404.
 	if cfg.Modules.Realtime {
 		r.GET("/api/ws", realtimeHandler.Connect)
+		// The same events over Server-Sent Events, for platforms that do
+		// not pass a WebSocket upgrade through to the application.
+		r.GET("/api/events", realtimeHandler.Events)
 	}
 
 	// Public webhook receiver — no auth on the route itself; each
@@ -943,12 +1173,20 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 
 		// Active sessions — see every signed-in device and revoke one or all.
 		protected.GET("/auth/sessions", sessionHandler.List)
+		// Who has been asking for sign-in links to this account. Read-only,
+		// and never the token itself.
+		protected.GET("/auth/magic-link/recent", authHandler.RecentMagicLinks)
 		protected.DELETE("/auth/sessions/:id", sessionHandler.Revoke)
 		protected.POST("/auth/sessions/revoke-all", sessionHandler.RevokeAll)
 
 		// Two-Factor Authentication (TOTP)
 		protected.POST("/auth/totp/setup", totpHandler.Setup)
 		protected.POST("/auth/totp/enable", totpHandler.Enable)
+		// The second factor by email rather than by app. Two steps, like the
+		// authenticator: send a code to prove the address works, then confirm
+		// it, so nobody turns on a factor they cannot receive.
+		protected.POST("/auth/totp/email/send", totpHandler.SendEmailSetupCode)
+		protected.POST("/auth/totp/email/enable", totpHandler.EnableEmail)
 		protected.POST("/auth/totp/disable", totpHandler.Disable)
 		protected.GET("/auth/totp/status", totpHandler.Status)
 		protected.POST("/auth/totp/backup-codes", totpHandler.RegenerateBackupCodes)
@@ -1132,6 +1370,11 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 		staff.GET("/admin/jobs/:status", middleware.RequireRole("ADMIN", "perm:jobs.view"), jobsHandler.ListByStatus)
 		staff.POST("/admin/jobs/:id/retry", middleware.RequireRole("ADMIN", "perm:jobs.edit"), jobsHandler.Retry)
 		staff.DELETE("/admin/jobs/queue/:queue", middleware.RequireRole("ADMIN", "perm:jobs.edit"), jobsHandler.ClearQueue)
+		staff.GET("/admin/sagas", middleware.RequireRole("ADMIN", "perm:jobs.view"), sagaHandler.List)
+		staff.GET("/admin/sagas/definitions", middleware.RequireRole("ADMIN", "perm:jobs.view"), sagaHandler.Definitions)
+		staff.GET("/admin/sagas/:id", middleware.RequireRole("ADMIN", "perm:jobs.view"), sagaHandler.GetByID)
+		staff.POST("/admin/sagas/:id/retry", middleware.RequireRole("ADMIN", "perm:jobs.edit"), sagaHandler.Retry)
+		staff.GET("/admin/routes", middleware.RequireRole("ADMIN", "perm:settings.view"), routeExplorerHandler.List)
 		staff.GET("/admin/cron/tasks", middleware.RequireRole("ADMIN", "perm:jobs.view"), cronHandler.ListTasks)
 		// Mail Preview: the registered email templates, rendered with sample
 		// data by the code that sends them.
@@ -1139,7 +1382,32 @@ func Setup(db *gorm.DB, cfg *config.Config, svc *Services) *gin.Engine {
 		staff.GET("/admin/mail/templates", middleware.RequireRole("ADMIN", "perm:system.view"), mailPreview.Templates)
 		staff.GET("/admin/mail/preview/:template", middleware.RequireRole("ADMIN", "perm:system.view"), mailPreview.Preview)
 		staff.GET("/admin/security/summary", middleware.RequireRole("ADMIN", "perm:system.view"), securityHandler.Summary)
+		staff.GET("/admin/security/trends", middleware.RequireRole("ADMIN", "perm:system.view"), securityHandler.Trends)
+		staff.GET("/admin/security/top", middleware.RequireRole("ADMIN", "perm:system.view"), securityHandler.Top)
+		staff.GET("/admin/security/threats", middleware.RequireRole("ADMIN", "perm:system.view"), securityHandler.Threats)
+		// Banning is a write, and one that can take the site off the internet
+		// if it is pointed at the wrong address, so it is ADMIN and nothing
+		// weaker. perm:system.view reads; it does not ban.
+		staff.POST("/admin/security/ban", middleware.RequireRole("ADMIN"), securityHandler.Ban)
+		staff.DELETE("/admin/security/ban/:ip", middleware.RequireRole("ADMIN"), securityHandler.Unban)
+		staff.POST("/admin/security/ban-offenders", middleware.RequireRole("ADMIN"), securityHandler.BanOffenders)
 		staff.GET("/admin/observability/summary", middleware.RequireRole("ADMIN", "perm:system.view"), observabilityHandler.Summary)
+
+		// The bin. Reading it is a system view; restoring somebody else's
+		// delete, or making one permanent, is ADMIN and nothing less: a
+		// resource's own delete permission says you may remove a row, not that
+		// you may undo another person's removal or put it beyond recovery.
+		staff.GET("/admin/trash", middleware.RequireRole("ADMIN", "perm:system.view"), trashHandler.Buckets)
+		staff.GET("/admin/trash/:table", middleware.RequireRole("ADMIN", "perm:system.view"), trashHandler.List)
+		staff.POST("/admin/trash/:table/:id/restore", middleware.RequireRole("ADMIN"), trashHandler.Restore)
+		staff.DELETE("/admin/trash/:table/:id", middleware.RequireRole("ADMIN"), trashHandler.Purge)
+		staff.DELETE("/admin/trash/:table", middleware.RequireRole("ADMIN"), trashHandler.Empty)
+
+		// Closed accounts, which are a soft delete the bin cannot show: users
+		// are deliberately not in the sync registry it reads.
+		staff.GET("/admin/deleted-accounts", middleware.RequireRole("ADMIN"), userHandler.DeletedAccounts)
+		staff.POST("/admin/deleted-accounts/:id/restore", middleware.RequireRole("ADMIN"), userHandler.RestoreAccount)
+		staff.DELETE("/admin/deleted-accounts/:id", middleware.RequireRole("ADMIN"), userHandler.PurgeAccount)
 		staff.GET("/admin/webhooks", middleware.RequireRole("ADMIN", "perm:system.view"), webhookHandler.List)
 		staff.GET("/admin/flags", middleware.RequireRole("ADMIN", "perm:system.view"), featureFlagHandler.List)
 		staff.GET("/admin/flags/:id/exposures", middleware.RequireRole("ADMIN", "perm:system.view"), featureFlagHandler.Exposures)

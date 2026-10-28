@@ -56,7 +56,7 @@ function CallbackInner() {
       .then(({ data }) => {
         const user = data.data;
         queryClient.setQueryData(["me"], user);
-        router.push(user.role === "USER" ? "/profile" : "/dashboard");
+        router.push(user.role === "USER" ? "/account" : "/dashboard");
       })
       .catch(() => {
         // /me failed even though we just landed here — either the
@@ -72,7 +72,7 @@ function CallbackInner() {
 
 function CallbackSpinner() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg-primary">
+    <div className="flex min-h-screen items-center justify-center bg-background">
       <div className="text-center">
         <div className="inline-flex h-10 w-10 animate-spin items-center justify-center rounded-full border-2 border-accent border-t-transparent" />
         <p className="mt-4 text-sm text-text-secondary">Signing you in...</p>

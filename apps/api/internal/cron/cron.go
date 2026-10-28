@@ -24,7 +24,10 @@ type Scheduler struct {
 }
 
 // New creates a new cron Scheduler connected to Redis.
-func New(redisURL string) (*Scheduler, error) {
+// autoBanEvery is how often the security sweep runs. It is a parameter
+// rather than a constant because it is the one schedule here an operator
+// reasonably changes.
+func New(redisURL string, autoBanEvery time.Duration) (*Scheduler, error) {
 	redisOpt, err := asynq.ParseRedisURI(redisURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing redis URL for cron: %w", err)
@@ -103,9 +106,49 @@ func New(redisURL string) (*Scheduler, error) {
 		Type:     "backup:scheduled",
 	})
 
+	// The security sweep: bans the addresses that keep attacking.
+	//
+	// Sentinel's own AutoBlock answers a burst, ten high-severity threats from
+	// one address inside ten minutes. This answers patience: four an hour for a
+	// week never trips that rule, and it is most of what real scanning looks
+	// like.
+	autoBanSpec, autoBanWindow := everyHours(autoBanEvery)
+	_, err = scheduler.Register(
+		autoBanSpec,
+		asynq.NewTask("security:auto_ban", nil),
+		asynq.Unique(autoBanWindow-time.Minute),
+		asynq.Timeout(15*time.Minute),
+		asynq.MaxRetry(2),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("registering the security auto-ban sweep: %w", err)
+	}
+	RegisteredTasks = append(RegisteredTasks, Task{
+		Name:     "Ban repeat attackers",
+		Schedule: autoBanSpec,
+		Type:     "security:auto_ban",
+	})
+
 	// grit:cron-tasks
 
 	return &Scheduler{scheduler: scheduler, redisURL: redisURL}, nil
+}
+
+// everyHours turns a duration into an hourly cron spec, and returns the
+// duration actually used.
+//
+// Cron has no "every 90 minutes": the spec is a set of hours, so anything that
+// is not a whole number of hours has to become one. Rounding down, because a
+// sweep asked to run more often should not run less often than asked.
+func everyHours(d time.Duration) (string, time.Duration) {
+	hours := int(d / time.Hour)
+	if hours < 1 {
+		hours = 1
+	}
+	if hours >= 24 {
+		return "0 0 * * *", 24 * time.Hour
+	}
+	return fmt.Sprintf("0 */%d * * *", hours), time.Duration(hours) * time.Hour
 }
 
 // Start runs the scheduler on whichever replica holds the cron lock; see

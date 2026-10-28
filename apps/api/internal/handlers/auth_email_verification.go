@@ -23,8 +23,8 @@ import (
 func (h *AuthHandler) SendVerificationEmail(c *gin.Context) {
 	userID := c.GetString("user_id")
 
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).First(&user, "id = ?", userID).Error; err != nil {
+	user, err := h.AuthService.UserByID(c.Request.Context(), userID)
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "User not found")
 		return
 	}
@@ -34,11 +34,24 @@ func (h *AuthHandler) SendVerificationEmail(c *gin.Context) {
 		return
 	}
 
-	h.deliverVerificationEmail(c.Request.Context(), user)
+	link := h.deliverVerificationEmail(c.Request.Context(), *user)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "Verification email sent. The link is valid for 48 hours.",
-	})
+	body := gin.H{"message": "Verification email sent. The link is valid for 48 hours."}
+
+	// In development the link comes back with the response, so the banner can
+	// offer it as something to click.
+	//
+	// Verifying an email in development otherwise means opening the log or
+	// digging a .html file out of storage/mail, which is enough friction that
+	// the warning banner simply stays up forever in every dev project. Guarded
+	// on APP_ENV: anywhere else this would hand a working verification link to
+	// whoever asked, which is the whole secret.
+	if h.Config.AppEnv == "development" && link != "" {
+		body["verify_url"] = link
+		body["message"] = "Development: the link is below rather than in your inbox."
+	}
+
+	c.JSON(http.StatusOK, body)
 }
 
 // The token from a verification link.
@@ -67,16 +80,16 @@ func (h *AuthHandler) VerifyEmail(c *gin.Context) {
 // keeps the response just as short and, unlike a goroutine, retries a provider
 // that is briefly down and survives a deploy. Without a queue the send is
 // inline, which is what development without Redis does.
-func (h *AuthHandler) deliverVerificationEmail(ctx context.Context, user models.User) {
+func (h *AuthHandler) deliverVerificationEmail(ctx context.Context, user models.User) string {
 	token, err := services.GenerateVerificationToken()
 	if err != nil {
 		log.Printf("email verification: generating token for %s: %v", user.Email, err)
-		return
+		return ""
 	}
 
 	if _, err := services.CreateEmailVerificationToken(h.DB, user.ID, user.Email, token); err != nil {
 		log.Printf("email verification: storing token for %s: %v", user.Email, err)
-		return
+		return ""
 	}
 
 	verifyURL := strings.TrimSuffix(h.Config.OAuthFrontendURL, "/") + "/verify-email?token=" + url.QueryEscape(token)
@@ -99,15 +112,16 @@ func (h *AuthHandler) deliverVerificationEmail(ctx context.Context, user models.
 		}); err != nil {
 			log.Printf("email verification: sending to %s: %v", user.Email, err)
 		}
-		return
+		return verifyURL
 	}
 
 	if h.Config.AppEnv == "production" {
 		log.Printf("email verification: NO MAILER CONFIGURED: %s cannot receive a link. Set MAIL_MAILER (see .env.example).", user.Email)
-		return
+		return ""
 	}
 
 	log.Printf("email verification link for %s: %s", user.Email, verifyURL)
+	return verifyURL
 }
 
 // ResetPassword resets a user's password with a valid token.

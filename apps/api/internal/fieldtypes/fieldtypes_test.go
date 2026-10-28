@@ -2,6 +2,7 @@ package fieldtypes
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -151,5 +152,61 @@ func TestEveryWriteIsChecked(t *testing.T) {
 	// An untagged column is not touched.
 	if err := db.Model(&row).Update("comment", "anything").Error; err != nil {
 		t.Errorf("an untagged column was checked: %v", err)
+	}
+}
+
+// A billing cycle belongs to a recurring project and means nothing on a
+// one-off one, which is a requirement about the row rather than the column.
+type project struct {
+	ID    uint   `gorm:"primarykey"`
+	Kind  string `json:"kind"`
+	Cycle string `json:"cycle" requiredif:"kind=recurring"`
+}
+
+func TestRequiredIf(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := Install(db); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	if err := db.AutoMigrate(&project{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	// The condition does not hold, so the empty column is fine.
+	oneOff := project{Kind: "one_off"}
+	if err := db.Create(&oneOff).Error; err != nil {
+		t.Fatalf("a one-off project with no cycle was refused: %v", err)
+	}
+
+	// It does hold, and the column is empty.
+	var fe *Error
+	err = db.Create(&project{Kind: "recurring"}).Error
+	if !errors.As(err, &fe) || fe.Field != "cycle" {
+		t.Fatalf("a recurring project with no cycle was accepted: %v", err)
+	}
+	if !strings.Contains(fe.Message, "is required when") {
+		t.Errorf("the message does not say why: %q", fe.Message)
+	}
+
+	// It holds and the column is filled in.
+	ok := project{Kind: "recurring", Cycle: "monthly"}
+	if err := db.Create(&ok).Error; err != nil {
+		t.Fatalf("a recurring project with a cycle was refused: %v", err)
+	}
+
+	// A PATCH carrying both columns is checked.
+	err = db.Model(&ok).Updates(map[string]interface{}{"kind": "recurring", "cycle": ""}).Error
+	if !errors.As(err, &fe) || fe.Field != "cycle" {
+		t.Errorf("a PATCH that empties the cycle was accepted: %v", err)
+	}
+
+	// A PATCH carrying one of them is left alone: the other column's stored
+	// value is not in the map, and reading the row here would make every
+	// PATCH two queries.
+	if err := db.Model(&oneOff).Updates(map[string]interface{}{"kind": "recurring"}).Error; err != nil {
+		t.Errorf("a PATCH naming only the condition was refused: %v", err)
 	}
 }

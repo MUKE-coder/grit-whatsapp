@@ -20,9 +20,6 @@ import (
 var syncTables = []string{
 	// Never users or uploads: the API refuses to sync them, since a push is a
 	// generic write and a user row carries its own role.
-	"conversations",
-	"participants",
-	"messages",
 	// grit:sync-tables
 }
 

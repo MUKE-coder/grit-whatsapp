@@ -46,6 +46,27 @@ export const brand = {
     intervalMs: 5000,
   },
 
+  /** Copy for the auth layouts that put proof beside the form: the mono
+   *  theme's showcase panel and the emerald theme's quote. Every value is
+   *  yours to rewrite, and the layouts fall back to these rather than
+   *  rendering an empty panel.
+   *
+   *  The quote is deliberately not attributed to a real person or company.
+   *  A scaffold that ships a fabricated testimonial with a plausible name is
+   *  a scaffold that ships a lie to production the first time somebody
+   *  forgets to edit it. */
+  proof: {
+    headline: "Built on Grit.",
+    subheadline: "Go on the back, React on the front, one command to ship.",
+    points: [
+      "Auth, RBAC and an admin panel on the first run",
+      "One API for web, mobile and desktop",
+      "Deploy with a single command",
+    ] as string[],
+    quote: "We replaced four services and a month of wiring with one command.",
+    quoteAuthor: "Replace this with a real one",
+  },
+
   /** Optional brand color overrides. Leave empty strings to inherit the
    *  active theme's palette. Useful for keeping the theme structure but
    *  swapping just the primary accent. */

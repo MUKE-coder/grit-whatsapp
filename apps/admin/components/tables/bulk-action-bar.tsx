@@ -64,7 +64,7 @@ export function BulkActionBar({
   const noun = count === 1 ? singularName.toLowerCase() : pluralName.toLowerCase();
   const base =
     "inline-flex min-h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition-colors disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-  const neutral = base + " border-border bg-bg-secondary text-text-primary hover:bg-bg-hover";
+  const neutral = base + " border-border bg-bg-secondary text-foreground hover:bg-bg-hover";
   const danger = base + " border-danger/40 bg-transparent text-danger hover:bg-danger/10";
 
   return (
@@ -72,7 +72,7 @@ export function BulkActionBar({
       aria-label="Bulk actions"
       className="fixed bottom-6 left-1/2 z-40 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center gap-3 rounded-xl border border-border bg-bg-elevated px-4 py-2.5 shadow-2xl shadow-black/25"
     >
-      <p className="text-sm font-medium text-text-primary">
+      <p className="text-sm font-medium text-foreground">
         {count} {noun} selected
       </p>
 
@@ -138,7 +138,7 @@ export function BulkActionBar({
       <button
         type="button"
         onClick={onClear}
-        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-sm text-text-secondary hover:bg-bg-hover hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        className="inline-flex min-h-9 items-center gap-1.5 rounded-lg px-3 text-sm text-text-secondary hover:bg-bg-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       >
         <X className="h-3.5 w-3.5" aria-hidden="true" />
         Clear selection

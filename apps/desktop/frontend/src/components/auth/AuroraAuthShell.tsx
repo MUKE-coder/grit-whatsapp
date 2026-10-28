@@ -30,7 +30,7 @@ export function AuroraAuthShell({ theme, mode, title, subtitle, children, errorM
         style={{ background: t.card, borderColor: t.border }}
       >
         <div className="flex flex-col items-center text-center space-y-3">
-          <BrandMark tint={t.primary} />
+          <BrandMark tint={t.primary} fg={t.primaryFg} />
           <div>
             <h2 className="text-2xl font-bold" style={{ fontFamily: f.display }}>{title}</h2>
             {subtitle && <p className="mt-1 text-sm" style={{ color: t.muted }}>{subtitle}</p>}

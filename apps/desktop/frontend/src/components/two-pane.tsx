@@ -61,7 +61,7 @@ export function ListPane({
               <button
                 type="button"
                 onClick={onNew}
-                className="h-8 px-2.5 rounded-lg bg-accent text-white text-[12px] font-medium hover:bg-accent-hover transition-colors inline-flex items-center gap-1"
+                className="h-8 px-2.5 rounded-lg bg-accent text-accent-fg text-[12px] font-medium hover:bg-accent-hover transition-colors inline-flex items-center gap-1"
               >
                 <Plus className="h-3.5 w-3.5" />
                 {newLabel}

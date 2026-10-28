@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -22,7 +21,9 @@ import (
 	"whatsapp/apps/api/internal/jobs"
 	"whatsapp/apps/api/internal/media"
 	"whatsapp/apps/api/internal/models"
+	"whatsapp/apps/api/internal/paginate"
 	"whatsapp/apps/api/internal/respond"
+	"whatsapp/apps/api/internal/services"
 	"whatsapp/apps/api/internal/storage"
 )
 
@@ -30,10 +31,25 @@ import (
 // with accepts narrows it; UPLOAD_ALLOWED_MIME adds to it, through
 // UploadMIMEAllowlist. Nothing writes to this map after startup.
 var defaultAllowedMIME = map[string]bool{
-	"image/jpeg":      true,
-	"image/png":       true,
-	"image/gif":       true,
-	"image/webp":      true,
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+	// AVIF, because the "image" accept group in internal/files lists it and
+	// so does the admin's file picker: without it here, a field declared
+	// file:image offered an .avif and the server refused the upload. That is
+	// the same trap the audio block below was added to close.
+	//
+	// Nothing decodes it, so it is stored as it arrived rather than
+	// optimised, which is the right answer for AVIF anyway: re-encoding one
+	// to JPEG makes it bigger.
+	//
+	// HEIC is deliberately not here, because no picker offers it, but a shop
+	// taking photographs straight off an iPhone wants
+	// UPLOAD_ALLOWED_MIME=image/heic and that now works: the sniffer in
+	// internal/storage names it, where before it saw octet-stream and
+	// refused the file for not being the image it said it was.
+	"image/avif":      true,
 	"video/mp4":       true,
 	"video/webm":      true,
 	"video/quicktime": true,
@@ -107,28 +123,54 @@ func (h *UploadHandler) mimeAllowed(contentType string) bool {
 	return h.AllowedMIME[contentType]
 }
 
-// uploadScope is the uploads a caller may see or change.
+// uploads is the service every method below reads and writes through. The bucket
+// stays here: a row and an object are two systems, and only this knows which
+// order to fail in.
+func (h *UploadHandler) uploads() *services.UploadService {
+	return &services.UploadService{DB: h.DB}
+}
+
+// uploadOwner is whose uploads a caller may reach: an empty string means
+// everybody's.
 //
 // A holder of uploads.<action>, or ADMIN, reaches every upload; anybody else
-// reaches only their own. Before this, GET and DELETE /uploads/:id handed the
-// path segment to GORM as a raw SQL condition (First with a string argument is
-// a WHERE clause, not a primary key), and List and Stats covered every user's
-// files.
-func (h *UploadHandler) uploadScope(c *gin.Context, action string) *gorm.DB {
-	q := h.DB.WithContext(c.Request.Context()).Model(&models.Upload{})
+// reaches only their own. Before this scoping existed, GET and DELETE
+// /uploads/:id handed the path segment to GORM as a raw SQL condition (First with
+// a string argument is a WHERE clause, not a primary key), and List and Stats
+// covered every user's files.
+//
+// Reading the request is the handler's job, which is why the decision is here and
+// the query is the service's.
+func (h *UploadHandler) uploadOwner(c *gin.Context, action string) string {
 	if role, _ := c.Get("user_role"); role == "ADMIN" {
-		return q
+		return ""
 	}
 	if grants, ok := c.Get("user_grants"); ok {
 		if list, ok := grants.([]string); ok && authz.Granted(list, "uploads."+action) {
-			return q
+			return ""
 		}
 	}
-	return q.Where("user_id = ?", c.GetString("user_id"))
+	return c.GetString("user_id")
 }
 
 // MaxUploadSize is the maximum file size (50 MB).
 const MaxUploadSize = 50 << 20
+
+// MaxVideoUploadSize is the ceiling for a video, which a minute of phone video
+// passes long before 50 MB: the same 300 MB the multipart path allows a field
+// that accepts video.
+const MaxVideoUploadSize = 300 << 20
+
+// maxUploadFor is the size ceiling for a file of this type. The presigned path
+// used MaxUploadSize for everything, so a video that uploaded fine as a form
+// field was refused, or deleted after it landed, when it went straight to the
+// bucket.
+func maxUploadFor(mimeType string) int64 {
+	if strings.HasPrefix(strings.ToLower(mimeType), "video/") {
+		return MaxVideoUploadSize
+	}
+	return MaxUploadSize
+}
 
 // UploadHandler handles file upload endpoints.
 type UploadHandler struct {
@@ -155,7 +197,7 @@ type UploadHandler struct {
 // store it verbatim in form state, no shape massaging needed.
 func (h *UploadHandler) Create(c *gin.Context) {
 	if h.Storage == nil {
-		respond.Fail(c, respond.CodeStorageUnavailable, "File storage is not configured")
+		respond.Fail(c, respond.CodeStorageUnavailable, "File storage is not configured. Set STORAGE_DRIVER=local in .env to keep uploads in a folder on this server, or point the bucket settings at a running object store.")
 		return
 	}
 
@@ -409,7 +451,7 @@ func (h *UploadHandler) Create(c *gin.Context) {
 		UserID:       userID,
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Create(&upload).Error; err != nil {
+	if err := h.uploads().Record(c.Request.Context(), &upload); err != nil {
 		_ = h.Storage.Delete(c.Request.Context(), key)
 		respond.Fail(c, respond.CodeInternalError, "Failed to save upload record")
 		return
@@ -442,98 +484,43 @@ func (h *UploadHandler) Create(c *gin.Context) {
 // (image / video / audio / document / other) so the storage admin
 // page can show usage at a glance. v3.31.32.
 func (h *UploadHandler) Stats(c *gin.Context) {
-	type kindRow struct {
-		Kind  string `gorm:"column:kind" json:"kind"`
-		Count int64  `gorm:"column:count" json:"count"`
-		Size  int64  `gorm:"column:size" json:"size"`
-	}
-
-	var total int64
-	if err := h.uploadScope(c, "view").Count(&total).Error; err != nil {
+	// All three counts report their errors now. Two of them used to discard
+	// theirs, so a storage page of zeros meant either an empty bucket or a
+	// question the database did not answer, with no way to tell which.
+	stats, err := h.uploads().Stats(c.Request.Context(), h.uploadOwner(c, "view"))
+	if err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to compute stats")
 		return
 	}
 
-	var totalSize int64
-	h.uploadScope(c, "view").Select("COALESCE(SUM(size), 0)").Scan(&totalSize)
-
-	// Bucket by MIME kind. SUBSTR + CASE in raw SQL keeps this a single
-	// scan regardless of DB engine (works on Postgres + SQLite).
-	rows := []kindRow{}
-	bucketExpr := `CASE
-		WHEN mime_type LIKE 'image/%' THEN 'image'
-		WHEN mime_type LIKE 'video/%' THEN 'video'
-		WHEN mime_type LIKE 'audio/%' THEN 'audio'
-		WHEN mime_type = 'application/pdf' THEN 'pdf'
-		WHEN mime_type LIKE '%spreadsheet%' OR mime_type LIKE '%excel%' OR mime_type = 'text/csv' THEN 'spreadsheet'
-		WHEN mime_type LIKE '%wordprocessing%' OR mime_type = 'application/msword' THEN 'document'
-		ELSE 'other'
-	END`
-	h.uploadScope(c, "view").
-		Select(bucketExpr + " AS kind, COUNT(*) AS count, COALESCE(SUM(size), 0) AS size").
-		Group("kind").
-		Scan(&rows)
-
 	c.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
-			"total_count": total,
-			"total_size":  totalSize,
-			"by_kind":     rows,
+			"total_count": stats.TotalCount,
+			"total_size":  stats.TotalSize,
+			"by_kind":     stats.ByKind,
 		},
 	})
 }
 
 // List returns a paginated list of uploads.
 func (h *UploadHandler) List(c *gin.Context) {
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 100 {
-		pageSize = 20
-	}
-
-	query := h.uploadScope(c, "view")
-
-	// Filter by MIME type
-	if mimeType := c.Query("mime_type"); mimeType != "" {
-		query = query.Where("mime_type LIKE ?", mimeType+"%")
-	}
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		respond.Fail(c, respond.CodeInternalError, "Failed to count uploads")
-		return
-	}
-
-	var uploads []models.Upload
-	offset := (page - 1) * pageSize
-	if err := query.Order("created_at DESC").Offset(offset).Limit(pageSize).Find(&uploads).Error; err != nil {
+	// Through paginate, like every other list in the framework. This one clamped
+	// the page and did the offset arithmetic itself, which is why it answered none
+	// of the search, sort or counts parameters the rest of the API does. The
+	// envelope is the same one it already returned.
+	params := paginate.Bind(c).With("mime_type", c.Query("mime_type"))
+	res, err := h.uploads().List(c.Request.Context(), params, h.uploadOwner(c, "view"))
+	if err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to fetch uploads")
 		return
 	}
-
-	pages := int(math.Ceil(float64(total) / float64(pageSize)))
-
-	c.JSON(http.StatusOK, gin.H{
-		"data": uploads,
-		"meta": gin.H{
-			"total":     total,
-			"page":      page,
-			"page_size": pageSize,
-			"pages":     pages,
-		},
-	})
+	c.JSON(http.StatusOK, res)
 }
 
 // GetByID returns a single upload by ID.
 func (h *UploadHandler) GetByID(c *gin.Context) {
-	id := c.Param("id")
-
-	var upload models.Upload
-	if err := h.uploadScope(c, "view").Where("id = ?", id).First(&upload).Error; err != nil {
+	upload, err := h.uploads().ByID(c.Request.Context(), c.Param("id"), h.uploadOwner(c, "view"))
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "Upload not found")
 		return
 	}
@@ -552,11 +539,11 @@ func (h *UploadHandler) GetByID(c *gin.Context) {
 // so a video seeks and a large download resumes.
 func (h *UploadHandler) Download(c *gin.Context) {
 	if h.Storage == nil {
-		respond.Fail(c, respond.CodeStorageUnavailable, "File storage is not configured")
+		respond.Fail(c, respond.CodeStorageUnavailable, "File storage is not configured. Set STORAGE_DRIVER=local in .env to keep uploads in a folder on this server, or point the bucket settings at a running object store.")
 		return
 	}
-	var upload models.Upload
-	if err := h.uploadScope(c, "view").Where("id = ?", c.Param("id")).First(&upload).Error; err != nil {
+	upload, err := h.uploads().ByID(c.Request.Context(), c.Param("id"), h.uploadOwner(c, "view"))
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "Upload not found")
 		return
 	}
@@ -571,8 +558,8 @@ func (h *UploadHandler) Download(c *gin.Context) {
 func (h *UploadHandler) Delete(c *gin.Context) {
 	id := c.Param("id")
 
-	var upload models.Upload
-	if err := h.uploadScope(c, "delete").Where("id = ?", id).First(&upload).Error; err != nil {
+	upload, err := h.uploads().ByID(c.Request.Context(), id, h.uploadOwner(c, "delete"))
+	if err != nil {
 		respond.Fail(c, respond.CodeNotFound, "Upload not found")
 		return
 	}
@@ -587,7 +574,7 @@ func (h *UploadHandler) Delete(c *gin.Context) {
 		}
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Delete(&upload).Error; err != nil {
+	if err := h.uploads().Delete(c.Request.Context(), upload); err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to delete upload")
 		return
 	}
@@ -609,7 +596,7 @@ type PresignRequest struct {
 
 func (h *UploadHandler) Presign(c *gin.Context) {
 	if h.Storage == nil {
-		respond.Fail(c, respond.CodeStorageUnavailable, "File storage is not configured")
+		respond.Fail(c, respond.CodeStorageUnavailable, "File storage is not configured. Set STORAGE_DRIVER=local in .env to keep uploads in a folder on this server, or point the bucket settings at a running object store.")
 		return
 	}
 
@@ -630,8 +617,8 @@ func (h *UploadHandler) Presign(c *gin.Context) {
 		return
 	}
 
-	if req.FileSize > MaxUploadSize {
-		respond.Fail(c, respond.CodeFileTooLarge, fmt.Sprintf("File size exceeds maximum of %d MB", MaxUploadSize/(1<<20)))
+	if limit := maxUploadFor(req.ContentType); req.FileSize > limit {
+		respond.Fail(c, respond.CodeFileTooLarge, fmt.Sprintf("File size exceeds maximum of %d MB", limit/(1<<20)))
 		return
 	}
 
@@ -683,9 +670,10 @@ func (h *UploadHandler) Profiles(c *gin.Context) {
 			"profiles": media.AllPublic(),
 			// What the server would do with a file that reaches it, so a client
 			// can tell whether it is expected to do the work itself.
-			"backend":    media.Backend(),
-			"max_upload": MaxUploadSize,
-			"lossy_webp": media.SupportsLossyWebP(),
+			"backend":          media.Backend(),
+			"max_upload":       MaxUploadSize,
+			"max_video_upload": MaxVideoUploadSize,
+			"lossy_webp":       media.SupportsLossyWebP(),
 		},
 	})
 }
@@ -733,12 +721,12 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 	}
 	// Once per key. A second row for the same object would let one delete remove
 	// a file another row still points at.
-	var recorded int64
-	if err := h.DB.WithContext(c.Request.Context()).Model(&models.Upload{}).Where("path = ?", req.Key).Count(&recorded).Error; err != nil {
+	recorded, err := h.uploads().PathRecorded(c.Request.Context(), req.Key)
+	if err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to check the upload")
 		return
 	}
-	if recorded > 0 {
+	if recorded {
 		respond.Fail(c, respond.CodeUploadAlreadyRecorded, "That upload has already been recorded")
 		return
 	}
@@ -755,10 +743,10 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 		respond.Fail(c, respond.CodeUploadNotFound, "No file was uploaded to that key")
 		return
 	}
-	if storedSize > MaxUploadSize {
+	if limit := maxUploadFor(storedType); storedSize > limit {
 		// It got past the presign somehow. Do not keep it.
 		_ = h.Storage.Delete(c.Request.Context(), req.Key)
-		respond.Fail(c, respond.CodeFileTooLarge, fmt.Sprintf("File size exceeds maximum of %d MB", MaxUploadSize/(1<<20)))
+		respond.Fail(c, respond.CodeFileTooLarge, fmt.Sprintf("File size exceeds maximum of %d MB", limit/(1<<20)))
 		return
 	}
 	// The stored type is what S3 recorded from the signed presign, so prefer it
@@ -777,7 +765,7 @@ func (h *UploadHandler) CompleteUpload(c *gin.Context) {
 		UserID:       userID,
 	}
 
-	if err := h.DB.WithContext(c.Request.Context()).Create(&upload).Error; err != nil {
+	if err := h.uploads().Record(c.Request.Context(), &upload); err != nil {
 		respond.Fail(c, respond.CodeInternalError, "Failed to save upload record")
 		return
 	}

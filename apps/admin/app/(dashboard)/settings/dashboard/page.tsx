@@ -336,7 +336,7 @@ function ResourceLayoutPanel({ resources, enabled, layouts, onChange }: Resource
                   className={
                     "rounded px-2.5 py-1 text-xs font-medium transition-colors " +
                     (mode === "split"
-                      ? "bg-accent text-white"
+                      ? "bg-accent text-accent-fg"
                       : "text-text-secondary hover:text-foreground")
                   }
                 >
@@ -348,7 +348,7 @@ function ResourceLayoutPanel({ resources, enabled, layouts, onChange }: Resource
                   className={
                     "rounded px-2.5 py-1 text-xs font-medium transition-colors " +
                     (mode === "tabs"
-                      ? "bg-accent text-white"
+                      ? "bg-accent text-accent-fg"
                       : "text-text-secondary hover:text-foreground")
                   }
                 >

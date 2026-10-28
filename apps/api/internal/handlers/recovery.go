@@ -31,6 +31,13 @@ func NewRecoveryHandler(db *gorm.DB, m *mail.Mailer) *RecoveryHandler {
 	return &RecoveryHandler{DB: db, Mail: m}
 }
 
+// users is the service the account reads below go through. This handler holds no
+// AuthService, and a lookup that works or panics depending on how the handler was
+// wired is the wrong trade for one struct literal.
+func (h *RecoveryHandler) users() *services.UserService {
+	return &services.UserService{DB: h.DB}
+}
+
 type setRecoveryRequest struct {
 	Password string `json:"password" binding:"required"`
 	Email    string `json:"email"`
@@ -51,8 +58,8 @@ func fail(c *gin.Context, status int, code, message string) {
 
 // authed loads the signed-in user and checks the supplied password.
 func (h *RecoveryHandler) authed(c *gin.Context, password string) (*models.User, bool) {
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).First(&user, "id = ?", c.GetString("user_id")).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), c.GetString("user_id"))
+	if err != nil {
 		fail(c, http.StatusUnauthorized, "UNAUTHORIZED", "Not signed in")
 		return nil, false
 	}
@@ -68,7 +75,7 @@ func (h *RecoveryHandler) authed(c *gin.Context, password string) (*models.User,
 		fail(c, http.StatusUnauthorized, "INVALID_PASSWORD", "That password is not correct")
 		return nil, false
 	}
-	return &user, true
+	return user, true
 }
 
 // Overview reports what is switched on and what this deployment can offer.
@@ -77,8 +84,8 @@ func (h *RecoveryHandler) authed(c *gin.Context, password string) (*models.User,
 // SMS provider, and the admin uses this to leave the card out entirely rather
 // than render a button that cannot work.
 func (h *RecoveryHandler) Overview(c *gin.Context) {
-	var user models.User
-	if err := h.DB.WithContext(c.Request.Context()).First(&user, "id = ?", c.GetString("user_id")).Error; err != nil {
+	user, err := h.users().GetByID(c.Request.Context(), c.GetString("user_id"))
+	if err != nil {
 		fail(c, http.StatusUnauthorized, "UNAUTHORIZED", "Not signed in")
 		return
 	}

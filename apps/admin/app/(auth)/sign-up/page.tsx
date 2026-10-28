@@ -6,6 +6,7 @@ import { useRegister } from "@/hooks/use-auth";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { RegisterSchema, type RegisterInput } from "@repo/shared/schemas";
+import { PasswordStrength } from "@/components/password-strength";
 import { AuthShell } from "@/components/auth/AuthShell";
 
 const inputBase =
@@ -18,7 +19,7 @@ export default function SignUpPage() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { mutate: registerUser, isPending, error: serverError } = useRegister();
 
-  const { register, handleSubmit, formState: { errors } } = useForm<RegisterInput>({
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<RegisterInput>({
     resolver: zodResolver(RegisterSchema),
   });
 
@@ -93,6 +94,7 @@ export default function SignUpPage() {
             <input
               id="password"
               type={showPassword ? "text" : "password"}
+              autoComplete="new-password"
               {...register("password")}
               className={(errors.password ? inputErr : inputOk) + " pr-12"}
               placeholder="At least 8 characters"
@@ -108,6 +110,10 @@ export default function SignUpPage() {
             </button>
           </div>
           {errors.password && <p className="text-sm text-red-500">{errors.password.message}</p>}
+          <PasswordStrength
+            value={watch("password") ?? ""}
+            about={[watch("email") ?? "", watch("firstName") ?? "", watch("lastName") ?? ""]}
+          />
         </div>
 
         <div className="space-y-2">
@@ -118,6 +124,7 @@ export default function SignUpPage() {
             <input
               id="confirmPassword"
               type={showConfirmPassword ? "text" : "password"}
+              autoComplete="new-password"
               {...register("confirmPassword")}
               className={(errors.confirmPassword ? inputErr : inputOk) + " pr-12"}
               placeholder="Re-enter your password"

@@ -79,6 +79,9 @@ import {
   Undo,
   Redo,
   Activity,
+  BarChart3,
+  Pause,
+  RotateCcw,
   TrendingUp,
   TrendingDown,
   ArrowLeft,
@@ -111,6 +114,7 @@ import {
   Gauge,
   Copy,
   KeyRound,
+  Fingerprint,
   Unlock,
   FileSpreadsheet,
   Music,
@@ -139,6 +143,8 @@ import {
   Truck,
   UsersRound,
   Workflow,
+  Circle,
+  CircleDashed,
   // grit:icons:import
   type LucideIcon,
 } from "lucide-react";
@@ -276,11 +282,16 @@ export {
   Undo,
   Redo,
   Activity,
+  BarChart3,
+  Pause,
+  RotateCcw,
   TrendingUp,
   TrendingDown,
   ArrowLeft,
   Shield,
   ShieldCheck,
+  Bug,
+  Target,
   Webhook,
   Cpu,
   Zap,
@@ -322,10 +333,18 @@ export {
   // v3.123 — API keys page + System Hub tile
   KeyRound,
   Unlock,
+  // v3.331 — the passkey button on the sign-in page
+  Fingerprint,
   // v3.31.31 — type-aware FilePreview icons (excel, audio).
   FileSpreadsheet,
   Music,
   // v3.103.0 — the form field "Generate" button. Note: an icon being in the
   // iconMap above does NOT make it a named export — it must be listed here too.
   Sparkles,
+  // v3.336.0 — the scaling readiness panel on /system/observability.
+  Circle,
+  CircleDashed,
+  // v3.355.0 — the saga runs screen. Note again: being in the iconMap above
+  // does NOT make an icon importable. It has to be listed here too.
+  Workflow,
 };
