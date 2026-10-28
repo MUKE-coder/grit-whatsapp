@@ -42,7 +42,7 @@
     "react-native-worklets": "0.5.1",
     "react-native-gesture-handler": "~2.28.0",
     "react-hook-form": "^7.54.0",
-    "@hookform/resolvers": "^3.9.0",
+    "@hookform/resolvers": "^6.0.0",
     "zod": "^3.23.0"
   },
   "devDependencies": {
