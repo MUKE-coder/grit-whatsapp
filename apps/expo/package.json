@@ -22,7 +22,7 @@
     "expo-web-browser": "~15.0.11",
     "expo-linear-gradient": "~15.0.7",
     "expo-blur": "~15.0.7",
-    "expo-image-picker": "~17.0.8",
+    "expo-image-picker": "~58.0.10",
     "expo-file-system": "~19.0.15",
     "expo-sharing": "~14.0.7",
     "expo-document-picker": "~14.0.7",
