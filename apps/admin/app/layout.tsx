@@ -4,6 +4,8 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 const inter = Inter({ subsets: ["latin"], variable: "--font-display" });
 const jetbrainsMono = JetBrains_Mono({ subsets: ["latin"], variable: "--font-mono", preload: false });
 import "./globals.css";
+// Yours, and never written over. Imported last so what it sets wins.
+import "./brand.css";
 import { Providers } from "@/components/shared/providers";
 
 export const metadata: Metadata = {

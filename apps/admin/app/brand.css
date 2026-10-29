@@ -1,0 +1,91 @@
+/* brand.css: your app's colours. Grit never writes this file again.
+ *
+ * globals.css carries Grit's token palette and is replaced on every upgrade.
+ * This file is imported after it and is yours, so anything set here survives
+ * `grit upgrade` and still lets globals.css keep arriving with fixes.
+ *
+ * Everything below is commented out. Uncomment what you want to change and
+ * leave the rest: a token you do not set keeps the value your theme gives it.
+ *
+ * The selectors look heavier than they need to be, and they do need to be:
+ * they have to out-specify the [data-theme] blocks in globals.css. Change the
+ * values, not the selectors.
+ *
+ *   whatsapp
+ */
+
+/* ── Light ──────────────────────────────────────────────────────────── */
+/*
+html[data-theme] {
+  --accent: #5b47e0;
+  --accent-hover: #4a38c9;
+  --accent-fg: #ffffff;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-tertiary: #f1f5f9;
+
+  --success: #0b7a45;
+  --warning: #a35f00;
+  --danger: #c93636;
+}
+*/
+
+/* ── Dark ───────────────────────────────────────────────────────────── */
+/* Both selectors, because the two frontends mark dark mode differently:
+ * the admin writes data-theme-mode on <html>, Tailwind writes .dark. */
+/*
+html[data-theme][data-theme-mode="dark"],
+html[data-theme].dark {
+  --accent: #a99bff;
+  --accent-hover: #b9aeff;
+  --accent-fg: #08090b;
+
+  --bg-primary: #08090b;
+  --bg-secondary: #0f1114;
+  --bg-tertiary: #15181c;
+
+  --success: #3dd68c;
+  --warning: #f5a524;
+  --danger: #ff6b6b;
+}
+*/
+
+/* ── Anything else ──────────────────────────────────────────────────── */
+/* Ordinary CSS from here down. It loads after Tailwind's layers, so a plain
+ * selector here beats a utility class without !important. */
+
+/* ── WhatsApp ───────────────────────────────────────────────────────────
+ * The real thing's palette, so the blueprint looks like the app it is a
+ * blueprint for. Grit never rewrites this file, so these survive upgrades.
+ */
+html[data-theme] {
+  --accent: #008069;
+  --accent-hover: #017561;
+  --accent-fg: #ffffff;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #f0f2f5;
+  --bg-tertiary: #e9edef;
+  --bg-elevated: #ffffff;
+  --bg-hover: #f5f6f6;
+
+  --border: #e9edef;
+  --success: #008069;
+}
+
+html[data-theme][data-theme-mode="dark"],
+html[data-theme].dark {
+  --accent: #00a884;
+  --accent-hover: #06cf9c;
+  --accent-fg: #111b21;
+
+  --bg-primary: #0b141a;
+  --bg-secondary: #111b21;
+  --bg-tertiary: #202c33;
+  --bg-elevated: #202c33;
+  --bg-hover: #2a3942;
+
+  --border: #222d34;
+  --success: #00a884;
+}

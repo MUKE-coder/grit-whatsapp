@@ -5,7 +5,7 @@
       "name": "push",
       "version": "1.0.0",
       "installed_at": "2026-09-21T18:51:23.7377541Z",
-      "updated_at": "2026-10-28T19:43:01.0781783Z",
+      "updated_at": "2026-10-29T05:49:35.3375776Z",
       "files": [
         "apps/api/internal/handlers/push.go",
         "apps/api/internal/models/push_token.go",

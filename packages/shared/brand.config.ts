@@ -10,14 +10,14 @@
 
 export const brand = {
   /** Display name shown on auth pages, the sidebar header, and emails. */
-  name: "Whatsapp",
+  name: "WhatsApp",
 
   /** One-line hero headline on the auth split panel. Keep it under 50 chars. */
-  tagline: "Manage everything\nin one place.",
+  tagline: "Message anyone,\nanywhere.",
 
   /** Secondary line under the tagline. 1–2 short sentences. */
   description:
-    "The admin dashboard for your application. Monitor, manage, and control your platform from a single screen.",
+    "Simple, reliable, private messaging. Direct and group chats with live delivery, read receipts and photos, on every device you own.",
 
   /** Logo — single-character fallback when no image is set. The full
    *  variant is used in the expanded sidebar + auth pages; the mark
