@@ -9,6 +9,7 @@ import { Sidebar } from "@/components/chat/sidebar";
 import { useChatSync, useMe } from "@/hooks/use-chat";
 import { disconnectRealtime } from "@/hooks/use-realtime";
 import { logout } from "@/lib/chat-api";
+import { brand } from "@repo/shared/brand";
 import { cn } from "@/lib/utils";
 
 /**
@@ -61,7 +62,7 @@ export function ChatApp() {
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-3 bg-bg-tertiary px-6 text-center">
             <MessageCircle className="h-12 w-12 text-text-muted" aria-hidden />
-            <h2 className="font-semibold text-foreground text-lg">Grit Chat</h2>
+            <h2 className="font-semibold text-foreground text-lg">{brand.name}</h2>
             <p className="max-w-sm text-sm text-text-secondary">
               Pick a chat on the left, or start a new one. Messages arrive live, with typing indicators and read
               receipts.

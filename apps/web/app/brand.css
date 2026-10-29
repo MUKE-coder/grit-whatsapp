@@ -89,3 +89,99 @@ html[data-theme].dark {
   --border: #222d34;
   --success: #00a884;
 }
+
+/* ── WhatsApp chat surface ──────────────────────────────────────────────
+ * The bubble is not the accent colour. WhatsApp's outgoing bubble is a pale
+ * tint with dark text, and using the brand green instead is the single
+ * change that stops a chat screenshot looking like WhatsApp.
+ */
+html[data-theme] {
+  --chat-bg: #efeae2;
+  --chat-panel: #ffffff;
+  --bubble-out: #d9fdd3;
+  --bubble-out-fg: #111b21;
+  --bubble-in: #ffffff;
+  --bubble-in-fg: #111b21;
+  --bubble-meta: #667781;
+  --tick-read: #53bdeb;
+}
+
+html[data-theme][data-theme-mode="dark"],
+html[data-theme].dark {
+  --chat-bg: #0b141a;
+  --chat-panel: #111b21;
+  --bubble-out: #005c4b;
+  --bubble-out-fg: #e9edef;
+  --bubble-in: #202c33;
+  --bubble-in-fg: #e9edef;
+  --bubble-meta: #8696a0;
+  --tick-read: #53bdeb;
+}
+
+/* ── The chat wallpaper ─────────────────────────────────────────────────
+ * WhatsApp's chat background is a colour with a faint doodle over it, and
+ * the doodle is most of why the real thing does not read as a flat panel.
+ *
+ * This is an original tile in the same spirit rather than a trace of their
+ * artwork, which is theirs and has no business being shipped inside a
+ * template. Same weight, same rhythm, drawn here.
+ *
+ * Opacity does the theme work: one tile, barely visible on beige, barely
+ * visible on near-black.
+ */
+.chat-wallpaper {
+  background-color: var(--chat-bg);
+  position: relative;
+}
+
+.chat-wallpaper::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22260%22%20height%3D%22260%22%20viewBox%3D%220%200%20260%20260%22%3E%3Cg%20fill%3D%22none%22%20stroke%3D%22%23000%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%3E%3Ccircle%20cx%3D%2234%22%20cy%3D%2240%22%20r%3D%2211%22%2F%3E%3Cpath%20d%3D%22M86%2028c6-7%2016-7%2022%200%22%2F%3E%3Cpath%20d%3D%22M150%2022v18M141%2031h18%22%2F%3E%3Crect%20x%3D%22196%22%20y%3D%2224%22%20width%3D%2220%22%20height%3D%2216%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22M22%2096c10-12%2026-12%2036%200%22%2F%3E%3Ccircle%20cx%3D%22112%22%20cy%3D%22100%22%20r%3D%227%22%2F%3E%3Cpath%20d%3D%22M164%2092l12%2012-12%2012-12-12z%22%2F%3E%3Cpath%20d%3D%22M214%2094h22M214%20104h14%22%2F%3E%3Cpath%20d%3D%22M30%20160a14%2014%200%201%200%2022%2010l-6%209%22%2F%3E%3Ccircle%20cx%3D%22104%22%20cy%3D%22166%22%20r%3D%2212%22%2F%3E%3Cpath%20d%3D%22M98%20166h12M104%20160v12%22%2F%3E%3Cpath%20d%3D%22M156%20156c8%200%2014%206%2014%2013s-6%2013-14%2013h-9l-7%207v-7a13%2013%200%200%201%200-26z%22%2F%3E%3Cpath%20d%3D%22M212%20158l10%2018h-20z%22%2F%3E%3Cpath%20d%3D%22M26%20226h26M26%20234h16%22%2F%3E%3Ccircle%20cx%3D%2296%22%20cy%3D%22230%22%20r%3D%229%22%2F%3E%3Cpath%20d%3D%22M146%20222l8%208-8%208-8-8z%22%2F%3E%3Cpath%20d%3D%22M196%20220c9-6%2020%202%2016%2012%22%2F%3E%3Ccircle%20cx%3D%22216%22%20cy%3D%22238%22%20r%3D%224%22%2F%3E%3Ccircle%20cx%3D%2268%22%20cy%3D%2270%22%20r%3D%223%22%2F%3E%3Ccircle%20cx%3D%22186%22%20cy%3D%2260%22%20r%3D%223%22%2F%3E%3Ccircle%20cx%3D%22132%22%20cy%3D%22132%22%20r%3D%223%22%2F%3E%3Ccircle%20cx%3D%2254%22%20cy%3D%22196%22%20r%3D%223%22%2F%3E%3Ccircle%20cx%3D%22178%22%20cy%3D%22200%22%20r%3D%223%22%2F%3E%3C%2Fg%3E%3C%2Fsvg%3E");
+  background-repeat: repeat;
+  background-size: 260px 260px;
+  opacity: 0.045;
+}
+
+html[data-theme][data-theme-mode="dark"] .chat-wallpaper::before,
+html[data-theme].dark .chat-wallpaper::before {
+  /* The tile is drawn in black, so on a dark surface it has to be flipped
+   * to register at all. */
+  filter: invert(1);
+  opacity: 0.055;
+}
+
+/* The messages sit above the pattern, not under it. */
+.chat-wallpaper > * {
+  position: relative;
+}
+
+/* ── Bubble tails ───────────────────────────────────────────────────────
+ * The little pointer on the first bubble of a run, and the single detail
+ * that most says WhatsApp. A border triangle rather than an SVG, so it
+ * takes its colour from the same variable as the bubble and cannot end up
+ * a different green in dark mode.
+ */
+.bubble-tail-out::after,
+.bubble-tail-in::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+}
+
+.bubble-tail-out::after {
+  right: -7px;
+  border-width: 0 0 10px 8px;
+  border-color: transparent transparent transparent var(--bubble-out);
+}
+
+.bubble-tail-in::after {
+  left: -7px;
+  border-width: 0 8px 10px 0;
+  border-color: transparent var(--bubble-in) transparent transparent;
+}

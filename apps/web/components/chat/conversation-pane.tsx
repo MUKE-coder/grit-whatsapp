@@ -151,14 +151,14 @@ function MessageList({ conv, me }: { conv: Conversation; me: Me }) {
     <div
       ref={scroller}
       onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-y-auto bg-bg-tertiary px-4 py-3 md:px-10"
+      className="chat-wallpaper min-h-0 flex-1 overflow-y-auto px-4 py-3 md:px-10"
       role="log"
       aria-label="Messages"
     >
       {isFetchingNextPage && <p className="py-2 text-center text-text-muted text-xs">Loading earlier messages…</p>}
       {isLoading && <p className="py-10 text-center text-sm text-text-muted">Loading messages…</p>}
       {!isLoading && messages.length === 0 && (
-        <p className="mx-auto my-10 max-w-xs rounded-lg bg-bg-elevated px-4 py-3 text-center text-sm text-text-secondary">
+        <p className="mx-auto my-10 max-w-xs rounded-lg bg-[var(--chat-panel)] px-4 py-3 text-center text-sm text-[var(--bubble-meta)] shadow-sm">
           No messages yet. Say hello.
         </p>
       )}
@@ -171,7 +171,7 @@ function MessageList({ conv, me }: { conv: Conversation; me: Me }) {
           return (
             <Fragment key={m.client_id ?? m.id}>
               {newDay && (
-                <li className="my-3 self-center rounded-md bg-bg-elevated px-3 py-1 text-text-secondary text-xs shadow-sm">
+                <li className="my-3 self-center rounded-md bg-[var(--chat-panel)] px-3 py-1 text-[var(--bubble-meta)] text-xs shadow-sm">
                   {dayLabel(m.created_at)}
                 </li>
               )}
@@ -217,8 +217,13 @@ function Bubble({
     <li className={cn("flex", mine ? "justify-end" : "justify-start", spaced && "mt-2")}>
       <div
         className={cn(
-          "max-w-[75%] rounded-lg px-3 py-1.5 text-sm shadow-sm",
-          mine ? "bg-accent text-white" : "bg-bg-elevated text-foreground",
+          "relative max-w-[85%] rounded-[7.5px] px-2.5 py-1.5 text-sm shadow-[0_1px_0.5px_rgba(11,20,26,0.13)] md:max-w-[65%]",
+          mine
+            ? "bg-[var(--bubble-out)] text-[var(--bubble-out-fg)]"
+            : "bg-[var(--bubble-in)] text-[var(--bubble-in-fg)]",
+          // The tail belongs to the first bubble of a run only, which is
+          // exactly what `spaced` already means.
+          spaced && (mine ? "bubble-tail-out" : "bubble-tail-in"),
         )}
       >
         {showName && <p className="mb-0.5 font-semibold text-success text-xs">{name}</p>}
@@ -230,7 +235,7 @@ function Bubble({
           />
         )}
         {message.body && <p className="whitespace-pre-wrap break-words">{message.body}</p>}
-        <p className={cn("mt-0.5 flex items-center justify-end gap-1 text-[11px]", mine ? "text-white/80" : "text-text-muted")}>
+        <p className="-mb-0.5 mt-0.5 flex items-center justify-end gap-1 text-[11px] text-[var(--bubble-meta)]">
           <time dateTime={message.created_at}>{clockTime(message.created_at)}</time>
           {tick && <Ticks tick={tick} onAccent />}
         </p>
